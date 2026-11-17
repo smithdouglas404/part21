@@ -1,0 +1,223 @@
+{
+    "finding": {
+        "id": "FIND-CUSTOM-07",
+        "title": "Supplier notification was not linked to the affected baseline",
+        "auditId": "AUD-026",
+        "productId": "NSS-4820",
+        "supplierId": "SUP-044",
+        "status": "Open \u00b7 custom simulation"
+    },
+    "status": "completed",
+    "steps": [
+        {
+            "phase": 1,
+            "phaseId": "scope",
+            "phaseLabel": "Frame the audit",
+            "agent": "scope-facilitator",
+            "route": "agentkit.audit.scope_framing",
+            "status": "Completed",
+            "toolCalls": [
+                {
+                    "sequence": 1,
+                    "tool": "ontology_resolve",
+                    "connector": "part21-assurance-ontology",
+                    "arguments": {
+                        "sourceId": "FIND-CUSTOM-07",
+                        "requestedClass": "Finding"
+                    },
+                    "result": "Custom finding mapped to Finding \u2192 Product \u2192 Requirement \u2192 Control path",
+                    "provenance": "Alternative simulation path \u00b7 Supplier oversight"
+                },
+                {
+                    "sequence": 2,
+                    "tool": "graph_find_open_scope",
+                    "connector": "core-graph",
+                    "arguments": {
+                        "productId": "NSS-4820",
+                        "controlFamily": "Supplier oversight"
+                    },
+                    "result": "Scope anchor and accountable owner resolved from ontology graph",
+                    "provenance": "Alternative simulation path \u00b7 Supplier oversight"
+                }
+            ],
+            "humanGate": {
+                "gate": "Scope confirmation",
+                "approver": "M. Lee \u00b7 Audit lead",
+                "decision": "Approved",
+                "rationale": "Scope is limited to NSS-4820 receiving traceability, supplier records, and affected baseline documents. Custom finding context: Supplier notification was not linked to the affected baseline.",
+                "timestamp": "2026-04-15T09:05:00Z"
+            }
+        },
+        {
+            "phase": 2,
+            "phaseId": "evidence",
+            "phaseLabel": "Pull evidence",
+            "agent": "evidence-curator",
+            "route": "agentkit.audit.evidence_intake",
+            "status": "Completed",
+            "toolCalls": [
+                {
+                    "sequence": 3,
+                    "tool": "erp_query_supplier_change_window",
+                    "connector": "vendor-erp-asterion",
+                    "arguments": {
+                        "supplierId": "SUP-044",
+                        "controlFamily": "Supplier oversight",
+                        "productId": "NSS-4820"
+                    },
+                    "result": "Alternative evidence route returned 4 source records and 1 stale join",
+                    "provenance": "Alternative simulation path \u00b7 Supplier oversight"
+                },
+                {
+                    "sequence": 4,
+                    "tool": "erp_reconcile_lot_certificate",
+                    "connector": "vendor-erp-asterion",
+                    "arguments": {
+                        "productId": "NSS-4820",
+                        "asOf": "2026-11-17"
+                    },
+                    "result": "Source reconciliation completed with one evidence gap preserved",
+                    "provenance": "Alternative simulation path \u00b7 Supplier oversight"
+                }
+            ],
+            "humanGate": {
+                "gate": "Evidence sufficiency",
+                "approver": "S. Rao \u00b7 Evidence owner",
+                "decision": "Approved with action",
+                "rationale": "Evidence is sufficient to trace the signal; the orphaned join remains an explicit open edge. Custom finding context: Supplier notification was not linked to the affected baseline.",
+                "timestamp": "2026-04-15T09:18:00Z"
+            }
+        },
+        {
+            "phase": 3,
+            "phaseId": "traceability",
+            "phaseLabel": "Trace the chain",
+            "agent": "genealogy-navigator",
+            "route": "agentkit.audit.trace_chain",
+            "status": "Completed",
+            "toolCalls": [
+                {
+                    "sequence": 5,
+                    "tool": "graph_walk_requirement_path",
+                    "connector": "core-graph",
+                    "arguments": {
+                        "findingId": "FIND-CUSTOM-07",
+                        "relationTypes": [
+                            "about",
+                            "appliesTo",
+                            "hasControl"
+                        ]
+                    },
+                    "result": "Requirement and control path traversed with temporal edges",
+                    "provenance": "Alternative simulation path \u00b7 Supplier oversight"
+                },
+                {
+                    "sequence": 6,
+                    "tool": "temporal_diff_entity_state",
+                    "connector": "bitemporal-event-store",
+                    "arguments": {
+                        "entityId": "NSS-4820",
+                        "window": "last-90-days"
+                    },
+                    "result": "One effective-state change is causal candidate; transaction history retained",
+                    "provenance": "Alternative simulation path \u00b7 Supplier oversight"
+                }
+            ],
+            "humanGate": {
+                "gate": "Trace acceptance",
+                "approver": "A. Patel \u00b7 Configuration",
+                "decision": "Approved",
+                "rationale": "Upstream requirement and supplier change paths are explained; one evidence join remains a finding condition. Custom finding context: Supplier notification was not linked to the affected baseline.",
+                "timestamp": "2026-04-15T09:34:00Z"
+            }
+        },
+        {
+            "phase": 4,
+            "phaseId": "findings",
+            "phaseLabel": "Evaluate findings",
+            "agent": "finding-challenger",
+            "route": "agentkit.audit.finding_challenge",
+            "status": "Completed",
+            "toolCalls": [
+                {
+                    "sequence": 7,
+                    "tool": "challenge_finding_against_counterevidence",
+                    "connector": "core-graph",
+                    "arguments": {
+                        "findingId": "FIND-CUSTOM-07",
+                        "sourceCount": 4
+                    },
+                    "result": "No counterevidence closes the control gap; severity remains Major candidate",
+                    "provenance": "Alternative simulation path \u00b7 Supplier oversight"
+                },
+                {
+                    "sequence": 8,
+                    "tool": "draft_corrective_action",
+                    "connector": "core-graph",
+                    "arguments": {
+                        "findingId": "FIND-CUSTOM-07",
+                        "ownerRole": "Quality lead",
+                        "dueInDays": 30
+                    },
+                    "result": "Draft action includes owner, due date, effectiveness test, and evidence request",
+                    "provenance": "Alternative simulation path \u00b7 Supplier oversight"
+                }
+            ],
+            "humanGate": {
+                "gate": "Finding approval",
+                "approver": "M. Lee \u00b7 Audit lead",
+                "decision": "Approved with action",
+                "rationale": "Major severity is accepted because traceability cannot be demonstrated end-to-end; owner and corrective action due date must be assigned. Custom finding context: Supplier notification was not linked to the affected baseline.",
+                "timestamp": "2026-04-15T09:52:00Z"
+            }
+        },
+        {
+            "phase": 5,
+            "phaseId": "closure",
+            "phaseLabel": "Review & close",
+            "agent": "readiness-facilitator",
+            "route": "agentkit.audit.readiness_close",
+            "status": "Completed",
+            "toolCalls": [
+                {
+                    "sequence": 9,
+                    "tool": "assemble_report_sections",
+                    "connector": "report-composer",
+                    "arguments": {
+                        "findingId": "FIND-CUSTOM-07",
+                        "includeTrace": true,
+                        "includeRegulation": true
+                    },
+                    "result": "Executive summary, finding narrative, evidence matrix, and action section prefilled",
+                    "provenance": "Alternative simulation path \u00b7 Supplier oversight"
+                },
+                {
+                    "sequence": 10,
+                    "tool": "recommend_next_moves",
+                    "connector": "core-graph",
+                    "arguments": {
+                        "findingId": "FIND-CUSTOM-07",
+                        "requireHumanApproval": true
+                    },
+                    "result": "Recommendation links to control family, Part 21 requirement, and remediation practice",
+                    "provenance": "Alternative simulation path \u00b7 Supplier oversight"
+                }
+            ],
+            "humanGate": {
+                "gate": "Report disposition",
+                "approver": "D. Novak \u00b7 Quality approver",
+                "decision": "Approved with action",
+                "rationale": "Report may proceed as Ready with actions; baseline acceptance remains blocked until FIND-2026-04 is closed. Custom finding context: Supplier notification was not linked to the affected baseline.",
+                "timestamp": "2026-04-15T10:10:00Z"
+            }
+        }
+    ],
+    "customContext": {
+        "findingId": "FIND-CUSTOM-07",
+        "title": "Supplier notification was not linked to the affected baseline",
+        "productId": "NSS-4820",
+        "supplierId": "SUP-044",
+        "controlFamily": "Supplier oversight",
+        "alternateConnector": "vendor-erp-asterion"
+    }
+}

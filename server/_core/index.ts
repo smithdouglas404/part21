@@ -6,8 +6,9 @@ import { registerOAuthRoutes } from "./oauth";
 import { publicPlatformScript } from "./publicConfig";
 import { appRouter } from "../routers";
 import { callMcpTool, getMcpManifest } from "../mcp";
-import { buildAuditReadinessReport, getAgentKitManifest, reportToCsv, runAuditSkill, simulateFullAuditExecution } from "../agentkit";
+import { buildAuditReadinessReport, exportBitemporalGraph, getAgentActivity, getAgentKitManifest, reportToCsv, runAuditSkill, simulateCustomAuditExecution, simulateFullAuditExecution } from "../agentkit";
 import { ontologyStorageStatus, syncOntologySnapshot } from "../ontology-store";
+import { getReportDraft, registerEvidence } from "../evidence";
 import { createContext } from "./context";
 import { serveStatic, setupVite } from "./vite";
 
@@ -38,6 +39,16 @@ async function startServer() {
   app.post("/api/agentkit/simulate", (req, res) => {
     res.json(simulateFullAuditExecution(typeof req.body?.findingId === "string" ? req.body.findingId : undefined));
   });
+  app.post("/api/agentkit/simulate-custom", (req, res) => {
+    res.json(simulateCustomAuditExecution({
+      findingId: String(req.body?.findingId ?? "FIND-CUSTOM-01"), title: String(req.body?.title ?? "Custom audit condition"), productId: String(req.body?.productId ?? "NSS-4820"), supplierId: String(req.body?.supplierId ?? "SUP-044"), controlFamily: String(req.body?.controlFamily ?? "21.51 traceability"), alternateConnector: req.body?.alternateConnector === "document-repository-live" ? "document-repository-live" : "vendor-erp-asterion",
+    }));
+  });
+  app.get("/api/agentkit/activity", (req, res) => res.json({ agents: getAgentActivity(typeof req.query.agentId === "string" ? req.query.agentId : undefined) }));
+  app.get("/api/agentkit/manifest.json", (_req, res) => res.json(getAgentKitManifest()));
+  app.get("/api/graph/export", (req, res) => res.json(exportBitemporalGraph(typeof req.query.findingId === "string" ? req.query.findingId : undefined)));
+  app.post("/api/evidence/intake", (req, res) => res.json(registerEvidence(req.body ?? {})));
+  app.get("/api/reports/draft", (req, res) => res.json(getReportDraft(typeof req.query.findingId === "string" ? req.query.findingId : undefined)));
   app.get("/api/ontology/storage", async (_req, res) => {
     res.json(await ontologyStorageStatus());
   });

@@ -1,0 +1,240 @@
+{
+    "protocol": "agentkit-demo",
+    "version": "0.1.0",
+    "executionContract": "ECC = Evidence, Context, Checkpoint",
+    "agents": [
+        {
+            "id": "scope-facilitator",
+            "name": "Scope Facilitator",
+            "role": "Turns ambiguity into an auditable scope",
+            "trigger": "audit.started",
+            "tools": [
+                "search_entities",
+                "detect_control_gaps",
+                "recommend_next_moves"
+            ],
+            "humanGate": "Scope confirmation"
+        },
+        {
+            "id": "evidence-curator",
+            "name": "Evidence Curator",
+            "role": "Finds, ranks, and reconciles source records",
+            "trigger": "audit.scope_confirmed",
+            "tools": [
+                "search_entities",
+                "get_evidence",
+                "check_audit_readiness"
+            ],
+            "humanGate": "Evidence sufficiency"
+        },
+        {
+            "id": "genealogy-navigator",
+            "name": "Genealogy Navigator",
+            "role": "Traces product and change relationships",
+            "trigger": "evidence.set_ready",
+            "tools": [
+                "trace_product_genealogy",
+                "compare_temporal_versions"
+            ],
+            "humanGate": "Trace acceptance"
+        },
+        {
+            "id": "finding-challenger",
+            "name": "Finding Challenger",
+            "role": "Tests signals and drafts reviewable findings",
+            "trigger": "trace.unresolved_edge",
+            "tools": [
+                "detect_control_gaps",
+                "create_finding"
+            ],
+            "humanGate": "Finding approval"
+        },
+        {
+            "id": "readiness-facilitator",
+            "name": "Readiness Facilitator",
+            "role": "Assembles facts into a report disposition",
+            "trigger": "finding.reviewed",
+            "tools": [
+                "check_audit_readiness",
+                "recommend_next_moves"
+            ],
+            "humanGate": "Report disposition"
+        }
+    ],
+    "skills": [
+        {
+            "id": "frame-scope",
+            "name": "Scope framing interview",
+            "phase": "scope",
+            "purpose": "Turn an audit request into a bounded, reviewable scope with explicit accountability.",
+            "agent": "scope-facilitator",
+            "route": "agentkit.audit.scope_framing",
+            "eccContract": "ECC-SCOPE-01",
+            "humanGate": "Audit lead confirms scope and accountable owner.",
+            "completionSignal": "Scope anchor, control families, risk rationale, and accountable owner are present.",
+            "questionCount": 3
+        },
+        {
+            "id": "evidence-intake",
+            "name": "Evidence intake coach",
+            "phase": "evidence",
+            "purpose": "Guide an employee through evidence retrieval without hiding freshness, provenance, or gaps.",
+            "agent": "evidence-curator",
+            "route": "agentkit.audit.evidence_intake",
+            "eccContract": "ECC-EVIDENCE-02",
+            "humanGate": "Evidence owner confirms that the source set is complete enough to review.",
+            "completionSignal": "Source set, effective-date window, freshness, and evidence gaps are recorded.",
+            "questionCount": 3
+        },
+        {
+            "id": "trace-chain",
+            "name": "Genealogy trace guide",
+            "phase": "traceability",
+            "purpose": "Walk the employee through upstream and downstream links until each conclusion has a defensible path.",
+            "agent": "genealogy-navigator",
+            "route": "agentkit.audit.trace_chain",
+            "eccContract": "ECC-TRACE-03",
+            "humanGate": "Quality reviewer accepts the trace boundary and unresolved edges.",
+            "completionSignal": "Anchor, traversal direction, direct relationships, and unresolved edges are visible.",
+            "questionCount": 3
+        },
+        {
+            "id": "finding-challenge",
+            "name": "Finding challenge dialogue",
+            "phase": "findings",
+            "purpose": "Help an employee challenge a signal before drafting a finding and preserve the reasoning trail.",
+            "agent": "finding-challenger",
+            "route": "agentkit.audit.finding_challenge",
+            "eccContract": "ECC-FINDING-04",
+            "humanGate": "Accountable audit lead approves severity, wording, and owner before issue.",
+            "completionSignal": "Signal, counter-evidence test, provisional severity, rationale, and owner are captured.",
+            "questionCount": 3
+        },
+        {
+            "id": "readiness-close",
+            "name": "Readiness review facilitator",
+            "phase": "closure",
+            "purpose": "Prepare a reportable readiness position while clearly separating facts, recommendations, and human decisions.",
+            "agent": "readiness-facilitator",
+            "route": "agentkit.audit.readiness_close",
+            "eccContract": "ECC-CLOSE-05",
+            "humanGate": "Audit lead and quality approver accept the report disposition.",
+            "completionSignal": "Readiness position, action list, approver, and report disposition are explicit.",
+            "questionCount": 3
+        }
+    ],
+    "phases": [
+        {
+            "id": "scope",
+            "label": "1. Frame the audit",
+            "short": "Scope",
+            "description": "Set the boundary, accountable roles, standard, and risk lens."
+        },
+        {
+            "id": "evidence",
+            "label": "2. Pull evidence",
+            "short": "Evidence",
+            "description": "Gather source records, test freshness, and identify missing joins."
+        },
+        {
+            "id": "traceability",
+            "label": "3. Trace the chain",
+            "short": "Traceability",
+            "description": "Walk product, requirement, supplier, change, and person relationships."
+        },
+        {
+            "id": "findings",
+            "label": "4. Evaluate findings",
+            "short": "Findings",
+            "description": "Challenge signals, draft findings, and preserve rationale."
+        },
+        {
+            "id": "closure",
+            "label": "5. Review & close",
+            "short": "Closure",
+            "description": "Prepare the readiness report and route decisions for approval."
+        }
+    ],
+    "connectors": [
+        {
+            "id": "vendor-erp-asterion",
+            "name": "Asterion Vendor ERP",
+            "category": "vendor-erp",
+            "transport": "MCP / SSE",
+            "auth": "OAuth 2.0 client credentials \u00b7 tenant-scoped",
+            "status": "Ready to connect",
+            "dataClasses": [
+                "Purchase orders",
+                "Heat lots",
+                "Receiving records",
+                "Supplier changes"
+            ],
+            "tools": [
+                {
+                    "name": "erp_search_material_lots",
+                    "description": "Find material heat, lot, batch, and certificate relationships.",
+                    "readOnly": true
+                },
+                {
+                    "name": "erp_get_purchase_order",
+                    "description": "Retrieve PO line, supplier notification, and delivery context.",
+                    "readOnly": true
+                },
+                {
+                    "name": "erp_get_receiving_inspection",
+                    "description": "Read receiving inspection and disposition records.",
+                    "readOnly": true
+                }
+            ]
+        },
+        {
+            "id": "document-repository-live",
+            "name": "Controlled Document Repository",
+            "category": "document-repository",
+            "transport": "MCP / webhook",
+            "auth": "Signed webhook + repository service account",
+            "status": "Ready to connect",
+            "dataClasses": [
+                "Controlled revisions",
+                "Change packages",
+                "Work instructions",
+                "Approval records"
+            ],
+            "tools": [
+                {
+                    "name": "dms_search_revisions",
+                    "description": "Search controlled document revisions by product, requirement, or effective date.",
+                    "readOnly": true
+                },
+                {
+                    "name": "dms_get_change_package",
+                    "description": "Retrieve change package contents, approvals, and impacted documents.",
+                    "readOnly": true
+                },
+                {
+                    "name": "dms_get_effective_snapshot",
+                    "description": "Resolve the document state at a historical effective date.",
+                    "readOnly": true
+                }
+            ]
+        }
+    ],
+    "ontology": {
+        "id": "part21-assurance-ontology",
+        "version": "0.1-demo",
+        "temporalModel": "Bitemporal event-sourced property graph: valid time + transaction time",
+        "classCount": 14,
+        "relationCount": 17
+    },
+    "storage": {
+        "provider": "PostgreSQL",
+        "connectionEnv": "POSTGRES_URL",
+        "tables": [
+            "ontology_entities",
+            "ontology_relationships",
+            "temporal_events",
+            "audit_decisions"
+        ],
+        "syncEndpoint": "/api/ontology/sync"
+    }
+}

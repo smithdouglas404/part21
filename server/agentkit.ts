@@ -1,7 +1,7 @@
 import { audits, controls, evidence, findings, metrics, sources } from "../shared/demo";
 import { auditPhases, auditSkills, agentKitAgents, getSkillForPhase } from "../shared/skills";
 import { mcpConnectors, simulatedFinding, type SimulationStep } from "../shared/execution";
-import { part21Ontology } from "../shared/ontology";
+import { getFindingOntologyContext, ontologyMappings, part21Ontology, temporalRecords } from "../shared/ontology";
 
 export function getAgentKitManifest() {
   return {
@@ -116,4 +116,42 @@ export function reportToCsv(report: ReturnType<typeof buildAuditReadinessReport>
 export function getSkillPhaseFromId(skillId: string) {
   const skill = auditSkills.find((item) => item.id === skillId);
   return getSkillForPhase(skill?.phase ?? "scope");
+}
+
+export interface CustomFindingInput {
+  findingId: string;
+  title: string;
+  productId: string;
+  supplierId: string;
+  controlFamily: string;
+  alternateConnector: "vendor-erp-asterion" | "document-repository-live";
+}
+
+export function simulateCustomAuditExecution(input: CustomFindingInput) {
+  const baseline = simulateFullAuditExecution(input.findingId);
+  const connector = input.alternateConnector;
+  const alternateCalls = [
+    [["ontology_resolve", "part21-assurance-ontology", { sourceId: input.findingId, requestedClass: "Finding" }, "Custom finding mapped to Finding → Product → Requirement → Control path"], ["graph_find_open_scope", "core-graph", { productId: input.productId, controlFamily: input.controlFamily }, "Scope anchor and accountable owner resolved from ontology graph"]],
+    [[connector === "vendor-erp-asterion" ? "erp_query_supplier_change_window" : "dms_search_evidence_by_control", connector, { supplierId: input.supplierId, controlFamily: input.controlFamily, productId: input.productId }, "Alternative evidence route returned 4 source records and 1 stale join"], [connector === "vendor-erp-asterion" ? "erp_reconcile_lot_certificate" : "dms_get_effective_snapshot", connector, { productId: input.productId, asOf: "2026-11-17" }, "Source reconciliation completed with one evidence gap preserved"]],
+    [["graph_walk_requirement_path", "core-graph", { findingId: input.findingId, relationTypes: ["about", "appliesTo", "hasControl"] }, "Requirement and control path traversed with temporal edges"], ["temporal_diff_entity_state", "bitemporal-event-store", { entityId: input.productId, window: "last-90-days" }, "One effective-state change is causal candidate; transaction history retained"]],
+    [["challenge_finding_against_counterevidence", "core-graph", { findingId: input.findingId, sourceCount: 4 }, "No counterevidence closes the control gap; severity remains Major candidate"], ["draft_corrective_action", "core-graph", { findingId: input.findingId, ownerRole: "Quality lead", dueInDays: 30 }, "Draft action includes owner, due date, effectiveness test, and evidence request"]],
+    [["assemble_report_sections", "report-composer", { findingId: input.findingId, includeTrace: true, includeRegulation: true }, "Executive summary, finding narrative, evidence matrix, and action section prefilled"], ["recommend_next_moves", "core-graph", { findingId: input.findingId, requireHumanApproval: true }, "Recommendation links to control family, Part 21 requirement, and remediation practice"]],
+  ] as const;
+  let sequence = 1;
+  const steps = baseline.steps.map((step, index) => ({
+    ...step,
+    toolCalls: alternateCalls[index].map(([tool, callConnector, args, result]) => ({ sequence: sequence++, tool, connector: callConnector, arguments: args, result, provenance: `Alternative simulation path · ${input.controlFamily}` })),
+    humanGate: { ...step.humanGate, rationale: `${step.humanGate.rationale} Custom finding context: ${input.title}.` },
+  }));
+  return { finding: { ...simulatedFinding, id: input.findingId, title: input.title, productId: input.productId, supplierId: input.supplierId, status: "Open · custom simulation" }, status: "completed" as const, steps, customContext: input };
+}
+
+export function exportBitemporalGraph(findingId = simulatedFinding.id) {
+  const context = getFindingOntologyContext(findingId);
+  return { exportType: "bitemporal-event-sourced-property-graph", exportVersion: "0.1-demo", generatedAt: new Date().toISOString(), findingId, ontology: part21Ontology, context, nodes: ontologyMappings, relationships: part21Ontology.relations, temporalEvents: temporalRecords, derivedTimeline: temporalRecords.filter((event) => event.entityId === "finding-2026-04" || event.entityId === "chg-2026-014" || event.entityId === "prod-4820"), provenance: { sourceMode: "synthetic", sourceSystems: ["core-graph", "Asterion Vendor ERP", "Controlled Document Repository"], humanReviewRequired: true } };
+}
+
+export function getAgentActivity(agentId?: string) {
+  const simulation = simulateFullAuditExecution();
+  return simulation.steps.filter((step) => !agentId || step.agent === agentId).map((step) => ({ phase: step.phase, phaseLabel: step.phaseLabel, agent: step.agent, route: step.route, humanGate: step.humanGate, toolCalls: step.toolCalls }));
 }
