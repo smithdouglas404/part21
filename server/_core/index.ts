@@ -5,6 +5,7 @@ import { createExpressMiddleware } from "@trpc/server/adapters/express";
 import { registerOAuthRoutes } from "./oauth";
 import { publicPlatformScript } from "./publicConfig";
 import { appRouter } from "../routers";
+import { callMcpTool, getMcpManifest } from "../mcp";
 import { createContext } from "./context";
 import { serveStatic, setupVite } from "./vite";
 
@@ -17,6 +18,14 @@ async function startServer() {
   app.get("/api/health", (_req, res) => res.json({ status: "ok" }));
   app.get("/api/platform/config.js", (_req, res) => {
     res.set("Cache-Control", "no-store").type("application/javascript").send(publicPlatformScript());
+  });
+  app.get("/api/mcp/tools", (_req, res) => {
+    res.json(getMcpManifest());
+  });
+  app.post("/api/mcp/call", (req, res) => {
+    const name = typeof req.body?.name === "string" ? req.body.name : "";
+    const args = req.body?.arguments && typeof req.body.arguments === "object" ? req.body.arguments : {};
+    res.json({ tool: name, data: callMcpTool(name, args) });
   });
   registerOAuthRoutes(app);
   // tRPC API
