@@ -6,7 +6,8 @@ import { registerOAuthRoutes } from "./oauth";
 import { publicPlatformScript } from "./publicConfig";
 import { appRouter } from "../routers";
 import { callMcpTool, getMcpManifest } from "../mcp";
-import { buildAuditReadinessReport, getAgentKitManifest, reportToCsv, runAuditSkill } from "../agentkit";
+import { buildAuditReadinessReport, getAgentKitManifest, reportToCsv, runAuditSkill, simulateFullAuditExecution } from "../agentkit";
+import { ontologyStorageStatus, syncOntologySnapshot } from "../ontology-store";
 import { createContext } from "./context";
 import { serveStatic, setupVite } from "./vite";
 
@@ -33,6 +34,15 @@ async function startServer() {
   });
   app.post("/api/agentkit/run", (req, res) => {
     res.json(runAuditSkill(String(req.body?.skillId ?? ""), req.body?.answers ?? {}));
+  });
+  app.post("/api/agentkit/simulate", (req, res) => {
+    res.json(simulateFullAuditExecution(typeof req.body?.findingId === "string" ? req.body.findingId : undefined));
+  });
+  app.get("/api/ontology/storage", async (_req, res) => {
+    res.json(await ontologyStorageStatus());
+  });
+  app.post("/api/ontology/sync", async (_req, res) => {
+    res.json(await syncOntologySnapshot());
   });
   app.get("/api/reports/audit-readiness", (req, res) => {
     res.json(buildAuditReadinessReport(typeof req.query.auditId === "string" ? req.query.auditId : "AUD-026"));

@@ -173,6 +173,8 @@ export const sources: SourceRecord[] = [
 
 export const mcpTools: McpToolDefinition[] = [
   { name: "search_entities", group: "Explore", description: "Search requirements, products, suppliers, people, evidence, changes, and findings with provenance-aware filters.", example: "{ query: 'NSS-4820', types: ['product', 'evidence'] }" },
+  { name: "ontology_resolve", group: "Semantics", description: "Resolve a source record into the Part 21 assurance ontology class, properties, and valid relationships.", example: "{ sourceId: 'FIND-2026-04' }" },
+  { name: "temporal_findings_query", group: "Temporal", description: "Query bitemporal finding history using valid time and transaction time to reconstruct what was known when.", example: "{ findingId: 'FIND-2026-04', asOf: '2026-04-15' }" },
   { name: "trace_product_genealogy", group: "Trace", description: "Walk upstream and downstream relationships from a product, lot, component, or controlled activity.", example: "{ productId: 'NSS-4820', depth: 3 }" },
   { name: "compare_temporal_versions", group: "Change", description: "Compare entity state across effective dates and return potential causes, impacts, and involved people.", example: "{ entityId: 'NSS-4820', from: '2025-01-01', to: '2026-04-14' }" },
   { name: "check_audit_readiness", group: "Assure", description: "Calculate evidence coverage, stale records, open findings, and unresolved control gaps for an audit scope.", example: "{ auditId: 'AUD-026' }" },

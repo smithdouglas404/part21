@@ -1,5 +1,7 @@
 import { audits, controls, evidence, findings, metrics, sources } from "../shared/demo";
 import { auditPhases, auditSkills, agentKitAgents, getSkillForPhase } from "../shared/skills";
+import { mcpConnectors, simulatedFinding, type SimulationStep } from "../shared/execution";
+import { part21Ontology } from "../shared/ontology";
 
 export function getAgentKitManifest() {
   return {
@@ -9,7 +11,61 @@ export function getAgentKitManifest() {
     agents: agentKitAgents,
     skills: auditSkills.map(({ questions, ...skill }) => ({ ...skill, questionCount: questions.length })),
     phases: auditPhases,
+    connectors: mcpConnectors,
+    ontology: { id: part21Ontology.id, version: part21Ontology.version, temporalModel: part21Ontology.temporalModel, classCount: part21Ontology.classes.length, relationCount: part21Ontology.relations.length },
+    storage: { provider: "PostgreSQL", connectionEnv: "POSTGRES_URL", tables: ["ontology_entities", "ontology_relationships", "temporal_events", "audit_decisions"], syncEndpoint: "/api/ontology/sync" },
   };
+}
+
+export function simulateFullAuditExecution(findingId = simulatedFinding.id): { finding: typeof simulatedFinding; status: "completed"; steps: SimulationStep[] } {
+  const finding = { ...simulatedFinding, id: findingId };
+  const steps: SimulationStep[] = [
+    {
+      phase: 1, phaseId: "scope", phaseLabel: "Frame the audit", agent: "scope-facilitator", route: "agentkit.audit.scope_framing", status: "Completed",
+      toolCalls: [
+        { sequence: 1, tool: "ontology_resolve", connector: "part21-assurance-ontology", arguments: { sourceId: finding.id }, result: "Finding → Audit → Product → Requirement / Supplier / Evidence / Change classes resolved", provenance: "Part 21 assurance ontology v0.1-demo" },
+        { sequence: 2, tool: "search_entities", connector: "core-graph", arguments: { query: finding.id, types: ["finding", "product", "audit"] }, result: "Resolved FIND-2026-04 → AUD-026 → NSS-4820", provenance: "Ontology-mapped assurance graph" },
+        { sequence: 3, tool: "detect_control_gaps", connector: "core-graph", arguments: { controlFamily: "traceability", productId: finding.productId }, result: "21.51 coverage watch; orphaned receiving edge detected", provenance: "Control coverage index" },
+      ],
+      humanGate: { gate: "Scope confirmation", approver: "M. Lee · Audit lead", decision: "Approved", rationale: "Scope is limited to NSS-4820 receiving traceability, supplier records, and affected baseline documents.", timestamp: "2026-04-15T09:05:00Z" },
+    },
+    {
+      phase: 2, phaseId: "evidence", phaseLabel: "Pull evidence", agent: "evidence-curator", route: "agentkit.audit.evidence_intake", status: "Completed",
+      toolCalls: [
+        { sequence: 4, tool: "erp_search_material_lots", connector: "vendor-erp-asterion", arguments: { supplierId: finding.supplierId, productId: finding.productId, lookbackDays: 180 }, result: "Heat 7B-441 found; 1 receiving inspection not linked to lot", provenance: "Asterion Vendor ERP · synthetic adapter" },
+        { sequence: 5, tool: "erp_get_receiving_inspection", connector: "vendor-erp-asterion", arguments: { inspectionId: "2-481", productId: finding.productId }, result: "Inspection passed; material-lot foreign key unresolved", provenance: "Asterion Vendor ERP · synthetic adapter" },
+        { sequence: 6, tool: "dms_search_revisions", connector: "document-repository-live", arguments: { query: "NSS-4820 CHG-014", effectiveFrom: "2026-03-01", effectiveTo: "2026-04-15" }, result: "EV-824 and CHG-014 package found; 2 work instructions impacted", provenance: "Controlled Document Repository · synthetic adapter" },
+      ],
+      humanGate: { gate: "Evidence sufficiency", approver: "S. Rao · Evidence owner", decision: "Approved with action", rationale: "Evidence is sufficient to trace the signal; the orphaned join remains an explicit open edge.", timestamp: "2026-04-15T09:18:00Z" },
+    },
+    {
+      phase: 3, phaseId: "traceability", phaseLabel: "Trace the chain", agent: "genealogy-navigator", route: "agentkit.audit.trace_chain", status: "Completed",
+      toolCalls: [
+        { sequence: 7, tool: "trace_product_genealogy", connector: "core-graph", arguments: { productId: finding.productId, depth: 3 }, result: "8 ontology-mapped entities / 8 relationships; FIND-2026-04 edge unresolved at receiving → heat lot", provenance: "Part 21 ontology graph" },
+        { sequence: 8, tool: "temporal_findings_query", connector: "bitemporal-event-store", arguments: { findingId: finding.id, asOf: "2026-04-15" }, result: "Finding became valid 2026-04-14; system recorded it 2026-04-14T09:10Z", provenance: "Valid-time + transaction-time event history" },
+        { sequence: 9, tool: "compare_temporal_versions", connector: "core-graph", arguments: { entityId: finding.productId, from: "2025-06-09", to: "2026-04-15" }, result: "CHG-014 followed supplier obsolescence notice; 2 downstream documents changed", provenance: "Temporal graph" },
+        { sequence: 10, tool: "dms_get_change_package", connector: "document-repository-live", arguments: { changeId: "CHG-014", includeApprovals: true }, result: "Change package approved by R. Gomez; baseline acceptance pending quality review", provenance: "Controlled Document Repository · synthetic adapter" },
+      ],
+      humanGate: { gate: "Trace acceptance", approver: "A. Patel · Configuration", decision: "Approved", rationale: "Upstream requirement and supplier change paths are explained; one evidence join remains a finding condition.", timestamp: "2026-04-15T09:34:00Z" },
+    },
+    {
+      phase: 4, phaseId: "findings", phaseLabel: "Evaluate findings", agent: "finding-challenger", route: "agentkit.audit.finding_challenge", status: "Completed",
+      toolCalls: [
+        { sequence: 11, tool: "detect_control_gaps", connector: "core-graph", arguments: { controlFamily: "traceability", findingId: finding.id }, result: "Major candidate supported by 21.51 gap; no critical safety impact inferred", provenance: "Control coverage index" },
+        { sequence: 12, tool: "create_finding", connector: "core-graph", arguments: { title: finding.title, sourceIds: ["EV-803", "2-481", "EV-771"], severity: "Major", ontologyClass: "Finding" }, result: "Draft FIND-2026-04 prepared; human approval required before issue", provenance: "Finding service · ontology-constrained synthetic draft" },
+      ],
+      humanGate: { gate: "Finding approval", approver: "M. Lee · Audit lead", decision: "Approved with action", rationale: "Major severity is accepted because traceability cannot be demonstrated end-to-end; owner and corrective action due date must be assigned.", timestamp: "2026-04-15T09:52:00Z" },
+    },
+    {
+      phase: 5, phaseId: "closure", phaseLabel: "Review & close", agent: "readiness-facilitator", route: "agentkit.audit.readiness_close", status: "Completed",
+      toolCalls: [
+        { sequence: 13, tool: "check_audit_readiness", connector: "core-graph", arguments: { auditId: finding.auditId, ontology: "part21-assurance-ontology" }, result: "82% readiness; 3 findings in scope; 4 stale or review-due evidence records", provenance: "Ontology-backed audit readiness engine" },
+        { sequence: 14, tool: "recommend_next_moves", connector: "core-graph", arguments: { context: finding.id, limit: 4, requireEvidenceLinks: true }, result: "Resolve heat-lot join; request equivalency statement; revalidate 2 work instructions; rerun 21.51 check", provenance: "Ontology-backed agent recommendation engine" },
+      ],
+      humanGate: { gate: "Report disposition", approver: "D. Novak · Quality approver", decision: "Approved with action", rationale: "Report may proceed as Ready with actions; baseline acceptance remains blocked until FIND-2026-04 is closed.", timestamp: "2026-04-15T10:10:00Z" },
+    },
+  ];
+  return { finding, status: "completed", steps };
 }
 
 export function runAuditSkill(skillId: string, answers: Record<string, unknown> = {}) {

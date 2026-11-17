@@ -10,6 +10,7 @@ import {
   sources,
   timelineEvents,
 } from "../shared/demo";
+import { getFindingOntologyContext, getTemporalHistory, part21Ontology, resolveOntology } from "../shared/ontology";
 
 export function getMcpManifest() {
   return {
@@ -33,6 +34,10 @@ export function callMcpTool(name: string, args: Record<string, unknown> = {}) {
       });
       return { query, count: nodes.length, entities: nodes };
     }
+    case "ontology_resolve":
+      return { sourceId: args.sourceId ?? "FIND-2026-04", mapping: resolveOntology(String(args.sourceId ?? "FIND-2026-04")), context: getFindingOntologyContext(String(args.sourceId ?? "FIND-2026-04")), ontologyVersion: part21Ontology.version };
+    case "temporal_findings_query":
+      return { findingId: args.findingId ?? "FIND-2026-04", temporalModel: part21Ontology.temporalModel, history: getTemporalHistory("finding-2026-04"), asOf: args.asOf ?? new Date().toISOString() };
     case "trace_product_genealogy": {
       const node = getGraphNode(String(args.productId ?? "prod-4820"));
       const relatedIds = graphEdges.flatMap((edge) => edge.from === node.id ? [edge.to] : edge.to === node.id ? [edge.from] : []);
