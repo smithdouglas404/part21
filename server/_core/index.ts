@@ -6,6 +6,7 @@ import { registerOAuthRoutes } from "./oauth";
 import { publicPlatformScript } from "./publicConfig";
 import { appRouter } from "../routers";
 import { callMcpTool, getMcpManifest } from "../mcp";
+import { buildAuditReadinessReport, getAgentKitManifest, reportToCsv, runAuditSkill } from "../agentkit";
 import { createContext } from "./context";
 import { serveStatic, setupVite } from "./vite";
 
@@ -26,6 +27,20 @@ async function startServer() {
     const name = typeof req.body?.name === "string" ? req.body.name : "";
     const args = req.body?.arguments && typeof req.body.arguments === "object" ? req.body.arguments : {};
     res.json({ tool: name, data: callMcpTool(name, args) });
+  });
+  app.get("/api/agentkit/manifest", (_req, res) => {
+    res.json(getAgentKitManifest());
+  });
+  app.post("/api/agentkit/run", (req, res) => {
+    res.json(runAuditSkill(String(req.body?.skillId ?? ""), req.body?.answers ?? {}));
+  });
+  app.get("/api/reports/audit-readiness", (req, res) => {
+    res.json(buildAuditReadinessReport(typeof req.query.auditId === "string" ? req.query.auditId : "AUD-026"));
+  });
+  app.get("/api/reports/audit-readiness.csv", (req, res) => {
+    const report = buildAuditReadinessReport(typeof req.query.auditId === "string" ? req.query.auditId : "AUD-026");
+    res.setHeader("Content-Disposition", `attachment; filename=part21-${report.audit.id.toLowerCase()}-readiness.csv`);
+    res.type("text/csv").send(reportToCsv(report));
   });
   registerOAuthRoutes(app);
   // tRPC API

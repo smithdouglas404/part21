@@ -1,4 +1,4 @@
-export type ViewId = "overview" | "audit" | "graph" | "evidence" | "controls" | "data";
+export type ViewId = "overview" | "audit" | "graph" | "evidence" | "controls" | "skills" | "data";
 
 export type EntityType = "requirement" | "product" | "supplier" | "evidence" | "person" | "change" | "finding";
 
