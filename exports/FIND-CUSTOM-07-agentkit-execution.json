@@ -141,25 +141,23 @@
             "toolCalls": [
                 {
                     "sequence": 7,
-                    "tool": "challenge_finding_against_counterevidence",
-                    "connector": "core-graph",
+                    "tool": "traverse_regulatory_tree",
+                    "connector": "part21-regulatory-pack",
                     "arguments": {
-                        "findingId": "FIND-CUSTOM-07",
-                        "sourceCount": 4
+                        "findingId": "FIND-CUSTOM-07"
                     },
-                    "result": "No counterevidence closes the control gap; severity remains Major candidate",
+                    "result": "Finding traversed to 21.51 \u2192 21.21 \u2192 21.61 \u2192 RG-1.234 \u2192 NEI-14-09",
                     "provenance": "Alternative simulation path \u00b7 Supplier oversight"
                 },
                 {
                     "sequence": 8,
-                    "tool": "draft_corrective_action",
-                    "connector": "core-graph",
+                    "tool": "assess_remediation_impact",
+                    "connector": "part21-regulatory-pack",
                     "arguments": {
                         "findingId": "FIND-CUSTOM-07",
-                        "ownerRole": "Quality lead",
-                        "dueInDays": 30
+                        "risk": "High"
                     },
-                    "result": "Draft action includes owner, due date, effectiveness test, and evidence request",
+                    "result": "High risk if not remediated; impact and accountable remediation path identified",
                     "provenance": "Alternative simulation path \u00b7 Supplier oversight"
                 }
             ],
@@ -181,6 +179,17 @@
             "toolCalls": [
                 {
                     "sequence": 9,
+                    "tool": "recommend_remediation",
+                    "connector": "part21-regulatory-pack",
+                    "arguments": {
+                        "findingId": "FIND-CUSTOM-07",
+                        "risk": "High"
+                    },
+                    "result": "Recommendation links to 5 regulatory remediation steps",
+                    "provenance": "Alternative simulation path \u00b7 Supplier oversight"
+                },
+                {
+                    "sequence": 10,
                     "tool": "assemble_report_sections",
                     "connector": "report-composer",
                     "arguments": {
@@ -188,18 +197,7 @@
                         "includeTrace": true,
                         "includeRegulation": true
                     },
-                    "result": "Executive summary, finding narrative, evidence matrix, and action section prefilled",
-                    "provenance": "Alternative simulation path \u00b7 Supplier oversight"
-                },
-                {
-                    "sequence": 10,
-                    "tool": "recommend_next_moves",
-                    "connector": "core-graph",
-                    "arguments": {
-                        "findingId": "FIND-CUSTOM-07",
-                        "requireHumanApproval": true
-                    },
-                    "result": "Recommendation links to control family, Part 21 requirement, and remediation practice",
+                    "result": "Executive summary, finding narrative, regulatory basis, evidence matrix, and action section prefilled",
                     "provenance": "Alternative simulation path \u00b7 Supplier oversight"
                 }
             ],

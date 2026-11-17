@@ -236,5 +236,33 @@
             "audit_decisions"
         ],
         "syncEndpoint": "/api/ontology/sync"
+    },
+    "regulatoryPack": {
+        "id": "10-cfr-part-21",
+        "title": "10 CFR Part 21 \u2014 Reporting of Defects and Noncompliance",
+        "sectionCount": 14,
+        "sources": [
+            {
+                "id": "ecfr-part-21",
+                "label": "eCFR Part 21",
+                "url": "https://www.ecfr.gov/current/title-10/chapter-I/part-21"
+            },
+            {
+                "id": "nrc-part-21-guidance",
+                "label": "NRC guidance on implementing 10 CFR Part 21",
+                "url": "https://www.nrc.gov/facilities-safety/new-reactors/how-we-regulate/regulatory-oversight/quality-assurance-for-new-reactors/guidance-on-implementation-of-10-cfr-part-21-requirements"
+            },
+            {
+                "id": "rg-1-234",
+                "label": "RG 1.234 \u2014 Evaluating Deviations and Reporting Defects and Noncompliance",
+                "url": "https://www.nrc.gov/docs/ML1733/ML17338A072.pdf"
+            },
+            {
+                "id": "nei-14-09",
+                "label": "NEI 14-09 \u2014 Guidelines for Implementation of 10 CFR Part 21",
+                "url": "https://www.nrc.gov/docs/ML1605/ML16054A825.pdf"
+            }
+        ],
+        "clientInterpretationRequired": true
     }
 }

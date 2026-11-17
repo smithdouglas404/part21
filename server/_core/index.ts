@@ -9,6 +9,7 @@ import { callMcpTool, getMcpManifest } from "../mcp";
 import { buildAuditReadinessReport, exportBitemporalGraph, getAgentActivity, getAgentKitManifest, reportToCsv, runAuditSkill, simulateCustomAuditExecution, simulateFullAuditExecution } from "../agentkit";
 import { ontologyStorageStatus, syncOntologySnapshot } from "../ontology-store";
 import { getReportDraft, registerEvidence } from "../evidence";
+import { assessRemediationImpact, part21RegulatoryPack, traverseRegulatoryTree } from "../../shared/regulatory";
 import { createContext } from "./context";
 import { serveStatic, setupVite } from "./vite";
 
@@ -49,6 +50,9 @@ async function startServer() {
   app.get("/api/graph/export", (req, res) => res.json(exportBitemporalGraph(typeof req.query.findingId === "string" ? req.query.findingId : undefined)));
   app.post("/api/evidence/intake", (req, res) => res.json(registerEvidence(req.body ?? {})));
   app.get("/api/reports/draft", (req, res) => res.json(getReportDraft(typeof req.query.findingId === "string" ? req.query.findingId : undefined)));
+  app.get("/api/regulatory/pack", (_req, res) => res.json(part21RegulatoryPack));
+  app.get("/api/regulatory/trace", (req, res) => res.json(traverseRegulatoryTree(typeof req.query.findingId === "string" ? req.query.findingId : undefined)));
+  app.get("/api/regulatory/impact", (req, res) => res.json(assessRemediationImpact(typeof req.query.findingId === "string" ? req.query.findingId : undefined)));
   app.get("/api/ontology/storage", async (_req, res) => {
     res.json(await ontologyStorageStatus());
   });

@@ -2,6 +2,7 @@ import { audits, controls, evidence, findings, metrics, sources } from "../share
 import { auditPhases, auditSkills, agentKitAgents, getSkillForPhase } from "../shared/skills";
 import { mcpConnectors, simulatedFinding, type SimulationStep } from "../shared/execution";
 import { getFindingOntologyContext, ontologyMappings, part21Ontology, temporalRecords } from "../shared/ontology";
+import { assessRemediationImpact, part21RegulatoryPack, traverseRegulatoryTree } from "../shared/regulatory";
 
 export function getAgentKitManifest() {
   return {
@@ -14,6 +15,7 @@ export function getAgentKitManifest() {
     connectors: mcpConnectors,
     ontology: { id: part21Ontology.id, version: part21Ontology.version, temporalModel: part21Ontology.temporalModel, classCount: part21Ontology.classes.length, relationCount: part21Ontology.relations.length },
     storage: { provider: "PostgreSQL", connectionEnv: "POSTGRES_URL", tables: ["ontology_entities", "ontology_relationships", "temporal_events", "audit_decisions"], syncEndpoint: "/api/ontology/sync" },
+    regulatoryPack: { id: part21RegulatoryPack.id, title: part21RegulatoryPack.title, sectionCount: part21RegulatoryPack.sections.length, sources: part21RegulatoryPack.sources, clientInterpretationRequired: true },
   };
 }
 
@@ -130,12 +132,14 @@ export interface CustomFindingInput {
 export function simulateCustomAuditExecution(input: CustomFindingInput) {
   const baseline = simulateFullAuditExecution(input.findingId);
   const connector = input.alternateConnector;
+  const regulatoryTrace = traverseRegulatoryTree(input.findingId);
+  const regulatoryImpact = assessRemediationImpact(input.findingId);
   const alternateCalls = [
     [["ontology_resolve", "part21-assurance-ontology", { sourceId: input.findingId, requestedClass: "Finding" }, "Custom finding mapped to Finding → Product → Requirement → Control path"], ["graph_find_open_scope", "core-graph", { productId: input.productId, controlFamily: input.controlFamily }, "Scope anchor and accountable owner resolved from ontology graph"]],
     [[connector === "vendor-erp-asterion" ? "erp_query_supplier_change_window" : "dms_search_evidence_by_control", connector, { supplierId: input.supplierId, controlFamily: input.controlFamily, productId: input.productId }, "Alternative evidence route returned 4 source records and 1 stale join"], [connector === "vendor-erp-asterion" ? "erp_reconcile_lot_certificate" : "dms_get_effective_snapshot", connector, { productId: input.productId, asOf: "2026-11-17" }, "Source reconciliation completed with one evidence gap preserved"]],
     [["graph_walk_requirement_path", "core-graph", { findingId: input.findingId, relationTypes: ["about", "appliesTo", "hasControl"] }, "Requirement and control path traversed with temporal edges"], ["temporal_diff_entity_state", "bitemporal-event-store", { entityId: input.productId, window: "last-90-days" }, "One effective-state change is causal candidate; transaction history retained"]],
-    [["challenge_finding_against_counterevidence", "core-graph", { findingId: input.findingId, sourceCount: 4 }, "No counterevidence closes the control gap; severity remains Major candidate"], ["draft_corrective_action", "core-graph", { findingId: input.findingId, ownerRole: "Quality lead", dueInDays: 30 }, "Draft action includes owner, due date, effectiveness test, and evidence request"]],
-    [["assemble_report_sections", "report-composer", { findingId: input.findingId, includeTrace: true, includeRegulation: true }, "Executive summary, finding narrative, evidence matrix, and action section prefilled"], ["recommend_next_moves", "core-graph", { findingId: input.findingId, requireHumanApproval: true }, "Recommendation links to control family, Part 21 requirement, and remediation practice"]],
+    [["traverse_regulatory_tree", "part21-regulatory-pack", { findingId: input.findingId }, `Finding traversed to ${regulatoryTrace.trace.path.slice(2).join(" → ")}`], ["assess_remediation_impact", "part21-regulatory-pack", { findingId: input.findingId, risk: regulatoryImpact.risk }, `${regulatoryImpact.risk} risk if not remediated; impact and accountable remediation path identified`]],
+    [["recommend_remediation", "part21-regulatory-pack", { findingId: input.findingId, risk: regulatoryImpact.risk }, `Recommendation links to ${regulatoryImpact.remediation.length} regulatory remediation steps`], ["assemble_report_sections", "report-composer", { findingId: input.findingId, includeTrace: true, includeRegulation: true }, "Executive summary, finding narrative, regulatory basis, evidence matrix, and action section prefilled"]],
   ] as const;
   let sequence = 1;
   const steps = baseline.steps.map((step, index) => ({

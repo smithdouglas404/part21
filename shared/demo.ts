@@ -1,4 +1,4 @@
-export type ViewId = "overview" | "audit" | "graph" | "evidence" | "controls" | "skills" | "roles" | "agents" | "data";
+export type ViewId = "overview" | "audit" | "graph" | "evidence" | "controls" | "skills" | "regulatory" | "roles" | "agents" | "data";
 
 export type EntityType = "requirement" | "product" | "supplier" | "evidence" | "person" | "change" | "finding";
 
@@ -175,6 +175,9 @@ export const mcpTools: McpToolDefinition[] = [
   { name: "search_entities", group: "Explore", description: "Search requirements, products, suppliers, people, evidence, changes, and findings with provenance-aware filters.", example: "{ query: 'NSS-4820', types: ['product', 'evidence'] }" },
   { name: "ontology_resolve", group: "Semantics", description: "Resolve a source record into the Part 21 assurance ontology class, properties, and valid relationships.", example: "{ sourceId: 'FIND-2026-04' }" },
   { name: "temporal_findings_query", group: "Temporal", description: "Query bitemporal finding history using valid time and transaction time to reconstruct what was known when.", example: "{ findingId: 'FIND-2026-04', asOf: '2026-04-15' }" },
+  { name: "traverse_regulatory_tree", group: "Regulatory", description: "Traverse a finding to its Part 21 provision, client control, implementation guidance, and source links.", example: "{ findingId: 'FIND-2026-04' }" },
+  { name: "assess_remediation_impact", group: "Regulatory", description: "Assess risk, remediation options, and impact if a Part 21-linked finding is not remediated.", example: "{ findingId: 'FIND-2026-04' }" },
+  { name: "recommend_remediation", group: "Regulatory", description: "Generate human-reviewable remediation recommendations grounded in a Part 21 trace and implementation guidance.", example: "{ findingId: 'FIND-2026-04', risk: 'High' }" },
   { name: "trace_product_genealogy", group: "Trace", description: "Walk upstream and downstream relationships from a product, lot, component, or controlled activity.", example: "{ productId: 'NSS-4820', depth: 3 }" },
   { name: "compare_temporal_versions", group: "Change", description: "Compare entity state across effective dates and return potential causes, impacts, and involved people.", example: "{ entityId: 'NSS-4820', from: '2025-01-01', to: '2026-04-14' }" },
   { name: "check_audit_readiness", group: "Assure", description: "Calculate evidence coverage, stale records, open findings, and unresolved control gaps for an audit scope.", example: "{ auditId: 'AUD-026' }" },

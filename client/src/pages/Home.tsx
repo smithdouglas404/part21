@@ -79,6 +79,7 @@ import { agentKitAgents, auditPhases, auditSkills, type AuditSkillPhase } from "
 import { mcpConnectors, simulatedFinding, type SimulationStep } from "@shared/execution";
 import { part21Ontology } from "@shared/ontology";
 import { assurancePersonas, type AssurancePersona } from "@shared/personas";
+import { part21RegulatoryPack, regulatoryTraceForFinding } from "@shared/regulatory";
 
 const navItems: { id: ViewId; label: string; icon: typeof Activity; count?: string }[] = [
   { id: "overview", label: "Command center", icon: Gauge },
@@ -87,6 +88,7 @@ const navItems: { id: ViewId; label: string; icon: typeof Activity; count?: stri
   { id: "evidence", label: "Evidence register", icon: FileCheck2, count: "84" },
   { id: "controls", label: "Control coverage", icon: ShieldCheck },
   { id: "skills", label: "Audit skills", icon: Workflow },
+  { id: "regulatory", label: "Regulatory trace", icon: FileSearch },
   { id: "roles", label: "Role workspaces", icon: Users },
   { id: "agents", label: "Agent observability", icon: Bot },
   { id: "data", label: "Data plane & MCP", icon: DatabaseZap },
@@ -295,6 +297,12 @@ function downloadJson(filename: string, payload: unknown) {
   anchor.href = url; anchor.download = filename; anchor.click(); URL.revokeObjectURL(url);
 }
 
+function RegulatoryTraceView({ onRun }: { onRun: (label: string) => void }) {
+  const [selectedSection, setSelectedSection] = useState("21.21");
+  const section = part21RegulatoryPack.sections.find((item) => item.id === selectedSection) ?? part21RegulatoryPack.sections[0];
+  return <div className="view-stack"><div className="view-title-row"><div><SectionKicker icon={FileSearch}>Regulatory trace</SectionKicker><h1>Traverse from a finding to the Part 21 provision, risk, and remediation.</h1><p>The agent uses a source-linked Part 21 pack plus a client-approved interpretation overlay. This is not a regulatory determination by itself.</p></div><div className="view-actions"><Badge tone="amber">Client interpretation required</Badge><button className="primary-button" onClick={() => onRun("Regulatory tree traversed · 21.21 → 21.51 → 21.61")}> <Waypoints size={14} />Traverse finding</button></div></div><div className="regulatory-hero"><div><span className="tiny-label">FINDING → REGULATION → CONTROL → REMEDIATION</span><div className="regulatory-path">{regulatoryTraceForFinding.path.map((item, index) => <span key={item}><b>{item}</b>{index < regulatoryTraceForFinding.path.length - 1 && <ChevronRight size={13} />}</span>)}</div><p>{regulatoryTraceForFinding.violationHypothesis}</p></div><div className="risk-block"><span className="tiny-label">RISK IF NOT REMEDIATED</span><strong>{regulatoryTraceForFinding.risk}</strong><small>{regulatoryTraceForFinding.impactIfNotRemediated}</small></div></div><div className="regulatory-layout"><aside className="reg-section-rail"><div className="skill-rail-label">PART 21 SECTION INDEX</div>{part21RegulatoryPack.sections.map((item) => <button key={item.id} className={`reg-section-option ${item.id === selectedSection ? "active" : ""}`} onClick={() => setSelectedSection(item.id)}><strong>§ {item.id}</strong><span>{item.title}</span></button>)}</aside><section className="reg-section-detail"><div className="section-kicker"><FileSearch size={13} /><span>§ {section.id} · {section.category}</span></div><h2>{section.title}</h2><p className="reg-summary">{section.summary}</p><div className="reg-columns"><div><span className="tiny-label">OBLIGATIONS</span><ul>{section.obligations.map((item) => <li key={item}><CheckCircle2 size={13} />{item}</li>)}</ul></div><div><span className="tiny-label">EVIDENCE TO TEST</span><ul>{section.evidenceToTest.map((item) => <li key={item}><FileCheck2 size={13} />{item}</li>)}</ul></div><div className="reg-unmet"><span className="tiny-label">IF UNMET</span><p>{section.ifUnmet}</p><Badge tone={section.defaultRisk === "High" ? "red" : "amber"}>Default risk: {section.defaultRisk}</Badge></div></div></section></div><div className="remediation-grid"><article className="panel"><div className="panel-head"><div><SectionKicker icon={ShieldCheck}>Remediation path</SectionKicker><h2>Recommended accountable actions</h2></div><Badge tone="amber">Human approval</Badge></div><ol className="remediation-list">{regulatoryTraceForFinding.remediation.map((item, index) => <li key={item}><span>{index + 1}</span><p>{item}</p></li>)}</ol></article><article className="panel"><div className="panel-head"><div><SectionKicker icon={Link2}>Authoritative sources</SectionKicker><h2>Regulatory and implementation references</h2></div><Badge tone="blue">{part21RegulatoryPack.sources.length} links</Badge></div><div className="source-link-list">{part21RegulatoryPack.sources.map((source) => <a key={source.id} href={source.url} target="_blank" rel="noreferrer"><span><strong>{source.label}</strong><small>{source.url}</small></span><ArrowUpRight size={14} /></a>)}</div></article></div></div>;
+}
+
 function PersonaWorkspace({ persona, onRun }: { persona: AssurancePersona; onRun: (label: string) => void }) {
   const primaryMetric = persona.id === "manager" ? ["82%", "12", "3", "19"] : persona.id === "auditor" ? ["32 / 47", "4", "14", "3"] : persona.id === "supplier" ? ["1", "4", "2", "7B-441"] : persona.id === "engineering" ? ["2", "6", "3", "CHG-014"] : ["3", "4", "2", "30d"];
   const metricLabels = persona.id === "manager" ? ["Readiness", "Open findings", "Supplier watch", "Changes / 30d"] : persona.id === "auditor" ? ["Evidence linked", "Review-due", "Mapped controls", "Findings"] : persona.focus;
@@ -356,6 +364,7 @@ export default function Home() {
     if (view === "evidence") return <EvidenceView onRun={run} />;
     if (view === "controls") return <ControlView onRun={run} />;
     if (view === "skills") return <SkillsView onRun={run} />;
+    if (view === "regulatory") return <RegulatoryTraceView onRun={run} />;
     if (view === "roles") return <RolesView onRun={run} />;
     if (view === "agents") return <AgentObservabilityView onRun={run} />;
     return <DataView onRun={run} connected={mcpConnected} />;

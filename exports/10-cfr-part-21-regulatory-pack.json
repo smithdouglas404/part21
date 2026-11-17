@@ -1,0 +1,289 @@
+{
+    "id": "10-cfr-part-21",
+    "title": "10 CFR Part 21 \u2014 Reporting of Defects and Noncompliance",
+    "authority": "U.S. Nuclear Regulatory Commission / eCFR",
+    "versionMode": "Live source link + client-controlled interpretation overlay",
+    "currentAsOf": "2026-11-13",
+    "sectionIndexSource": "eCFR Table of Contents: 21.1\u201321.62",
+    "sources": [
+        {
+            "id": "ecfr-part-21",
+            "label": "eCFR Part 21",
+            "url": "https://www.ecfr.gov/current/title-10/chapter-I/part-21"
+        },
+        {
+            "id": "nrc-part-21-guidance",
+            "label": "NRC guidance on implementing 10 CFR Part 21",
+            "url": "https://www.nrc.gov/facilities-safety/new-reactors/how-we-regulate/regulatory-oversight/quality-assurance-for-new-reactors/guidance-on-implementation-of-10-cfr-part-21-requirements"
+        },
+        {
+            "id": "rg-1-234",
+            "label": "RG 1.234 \u2014 Evaluating Deviations and Reporting Defects and Noncompliance",
+            "url": "https://www.nrc.gov/docs/ML1733/ML17338A072.pdf"
+        },
+        {
+            "id": "nei-14-09",
+            "label": "NEI 14-09 \u2014 Guidelines for Implementation of 10 CFR Part 21",
+            "url": "https://www.nrc.gov/docs/ML1605/ML16054A825.pdf"
+        }
+    ],
+    "sections": [
+        {
+            "id": "21.1",
+            "title": "Purpose",
+            "category": "Purpose",
+            "summary": "Establishes procedures and requirements for implementing the Energy Reorganization Act provisions addressed by Part 21.",
+            "obligations": [
+                "Maintain a process that can identify and evaluate reportable defects and noncompliance."
+            ],
+            "evidenceToTest": [
+                "Approved Part 21 procedure",
+                "Roles and delegation matrix"
+            ],
+            "ifUnmet": "The organization may not have a controlled basis for deciding when a condition enters Part 21 evaluation.",
+            "defaultRisk": "Medium"
+        },
+        {
+            "id": "21.2",
+            "title": "Scope",
+            "category": "Purpose",
+            "summary": "Defines the entities, facilities, activities, and basic components within the scope of Part 21.",
+            "obligations": [
+                "Determine whether the organization, activity, basic component, or supplier is subject to Part 21."
+            ],
+            "evidenceToTest": [
+                "License / authorization scope",
+                "Basic-component classification",
+                "Supplier applicability assessment"
+            ],
+            "ifUnmet": "A condition could be evaluated under the wrong regulatory pathway or not evaluated at all.",
+            "defaultRisk": "High"
+        },
+        {
+            "id": "21.3",
+            "title": "Definitions",
+            "category": "Definitions",
+            "summary": "Provides the defined terms used by Part 21, including basic component, defect, deviation, failure to comply, and substantial safety hazard.",
+            "obligations": [
+                "Use controlled definitions when classifying a deviation, defect, or failure to comply."
+            ],
+            "evidenceToTest": [
+                "Classification rationale",
+                "Definition crosswalk",
+                "Technical evaluation record"
+            ],
+            "ifUnmet": "The system may produce an inconsistent or unsupported classification.",
+            "defaultRisk": "High"
+        },
+        {
+            "id": "21.4",
+            "title": "Interpretations",
+            "category": "Definitions",
+            "summary": "Provides the Commission interpretation pathway for Part 21 requirements and makes interpretation governance an explicit control point.",
+            "obligations": [
+                "Record the client-approved interpretation used for a compliance conclusion."
+            ],
+            "evidenceToTest": [
+                "Approved interpretation memo",
+                "Legal/compliance review",
+                "Interpretation version"
+            ],
+            "ifUnmet": "An agent may apply an unapproved interpretation to a regulatory conclusion.",
+            "defaultRisk": "High"
+        },
+        {
+            "id": "21.5",
+            "title": "Communications",
+            "category": "Records",
+            "summary": "Defines communication expectations relevant to Part 21 information and responsible contacts.",
+            "obligations": [
+                "Maintain controlled communications and access to responsible contacts."
+            ],
+            "evidenceToTest": [
+                "Communication procedure",
+                "Responsible officer designation",
+                "Escalation contact test"
+            ],
+            "ifUnmet": "Affected personnel may not know how to escalate a potentially reportable condition.",
+            "defaultRisk": "Medium"
+        },
+        {
+            "id": "21.6",
+            "title": "Posting requirements",
+            "category": "Records",
+            "summary": "Sets notice and posting expectations for Part 21 information and contacts.",
+            "obligations": [
+                "Maintain required postings and access to the responsible contacts."
+            ],
+            "evidenceToTest": [
+                "Current postings",
+                "Electronic notice location",
+                "Responsible officer designation"
+            ],
+            "ifUnmet": "Affected personnel may not know how to escalate a potentially reportable condition.",
+            "defaultRisk": "Medium"
+        },
+        {
+            "id": "21.7",
+            "title": "Exemptions",
+            "category": "Purpose",
+            "summary": "Provides the Commission's exemption authority and identifies boundaries that require careful applicability analysis.",
+            "obligations": [
+                "Record the legal basis for any claimed exemption or exclusion."
+            ],
+            "evidenceToTest": [
+                "Exemption record",
+                "Applicability decision",
+                "Client legal/compliance review"
+            ],
+            "ifUnmet": "A false exemption assumption can mask a reportability obligation.",
+            "defaultRisk": "High"
+        },
+        {
+            "id": "21.8",
+            "title": "Information collection requirements: OMB approval",
+            "category": "Records",
+            "summary": "Identifies the approved information collection requirements associated with Part 21.",
+            "obligations": [
+                "Maintain the controlled forms and records needed for the approved information collection requirements."
+            ],
+            "evidenceToTest": [
+                "Controlled forms",
+                "Record completeness check",
+                "Retention mapping"
+            ],
+            "ifUnmet": "The audit record may omit required information or use an uncontrolled collection mechanism.",
+            "defaultRisk": "Medium"
+        },
+        {
+            "id": "21.21",
+            "title": "Notification of failure to comply or existence of a defect and its evaluation",
+            "category": "Notification",
+            "summary": "Requires procedures to evaluate deviations and failures to comply for defects or failures associated with substantial safety hazards, including escalation and notification paths.",
+            "obligations": [
+                "Evaluate deviations and failures to comply as soon as practicable and within the applicable time window.",
+                "Escalate qualifying results to the responsible officer or designated person.",
+                "Preserve the evaluation and notification decision basis."
+            ],
+            "evidenceToTest": [
+                "Discovery timestamp",
+                "60-day evaluation tracker",
+                "Interim report decision",
+                "Responsible officer notification",
+                "Technical evaluation"
+            ],
+            "ifUnmet": "A potentially reportable defect may not be evaluated, escalated, or notified within the required window.",
+            "defaultRisk": "High"
+        },
+        {
+            "id": "21.31",
+            "title": "Procurement documents",
+            "category": "Implementation",
+            "summary": "Sets procurement-document expectations relevant to Part 21 responsibilities and supplied basic components.",
+            "obligations": [
+                "Flow down applicable Part 21 responsibilities and acceptance requirements into procurement documents."
+            ],
+            "evidenceToTest": [
+                "Purchase order clauses",
+                "Supplier quality requirements",
+                "Flow-down review"
+            ],
+            "ifUnmet": "Supplier responsibilities and evidence expectations may not be contractually controlled.",
+            "defaultRisk": "High"
+        },
+        {
+            "id": "21.41",
+            "title": "Inspections",
+            "category": "Records",
+            "summary": "Provides the inspection context for activities and records governed by Part 21.",
+            "obligations": [
+                "Make relevant records and responsible personnel available for inspection."
+            ],
+            "evidenceToTest": [
+                "Inspection request log",
+                "Record retrieval test",
+                "Inspection response package"
+            ],
+            "ifUnmet": "The organization may not be able to demonstrate control of the evidence during inspection.",
+            "defaultRisk": "Medium"
+        },
+        {
+            "id": "21.51",
+            "title": "Maintenance and inspection of records",
+            "category": "Records",
+            "summary": "Requires records supporting Part 21 evaluations and the ability to make them available for inspection.",
+            "obligations": [
+                "Maintain complete, legible, retrievable, and auditable Part 21 records.",
+                "Preserve records that support both reportable and non-reportable evaluation decisions."
+            ],
+            "evidenceToTest": [
+                "Evaluation record",
+                "Source evidence",
+                "Approval history",
+                "Retention and retrieval test"
+            ],
+            "ifUnmet": "The conclusion may be impossible to defend because the evidence chain and decision history are incomplete.",
+            "defaultRisk": "High"
+        },
+        {
+            "id": "21.61",
+            "title": "Failure to notify",
+            "category": "Notification",
+            "summary": "Addresses failure-to-notify consequences and reinforces the need for a controlled, accountable notification decision path.",
+            "obligations": [
+                "Escalate a potentially reportable condition through the approved notification workflow.",
+                "Preserve the basis for the notification or non-notification decision."
+            ],
+            "evidenceToTest": [
+                "Reportability determination",
+                "Written notification draft",
+                "Safety significance analysis",
+                "Affected component list"
+            ],
+            "ifUnmet": "A required notification may be late, incomplete, or unsupported.",
+            "defaultRisk": "High"
+        },
+        {
+            "id": "21.62",
+            "title": "Criminal penalties",
+            "category": "Implementation",
+            "summary": "Identifies criminal penalty implications associated with violations of Part 21.",
+            "obligations": [
+                "Escalate suspected deliberate or material violations through approved legal and compliance channels."
+            ],
+            "evidenceToTest": [
+                "Escalation record",
+                "Investigation records",
+                "Legal/compliance review"
+            ],
+            "ifUnmet": "The organization may mishandle a potentially serious violation or fail to preserve the required decision path.",
+            "defaultRisk": "High"
+        }
+    ],
+    "implementationGuidance": [
+        {
+            "id": "RG-1.234",
+            "title": "Evaluate deviations and report defects using an accepted method",
+            "source": "NRC Regulatory Guide 1.234",
+            "steps": [
+                "Identify the discovery point",
+                "Evaluate the deviation or failure to comply",
+                "Determine defect / substantial safety hazard significance",
+                "Escalate and report when required",
+                "Maintain the decision record"
+            ]
+        },
+        {
+            "id": "NEI-14-09",
+            "title": "Operational implementation guidance",
+            "source": "NEI 14-09, Revision 1",
+            "steps": [
+                "Define procurement and supplier interfaces",
+                "Preserve non-reportable evaluation records",
+                "Control discovery and point-of-discovery logic",
+                "Coordinate purchaser/supplier evaluation and notification",
+                "Track transfer of evaluation/reporting responsibility"
+            ]
+        }
+    ]
+}
