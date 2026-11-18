@@ -16,6 +16,7 @@ A traceable operational assurance cockpit for nuclear quality teams: connect req
 - Studio gateway mode that combines the existing Studio OpenAPI with Part 21 routes under `/api/v1/part21` without operation-id collisions.
 - Muse-to-Part-21-agent dialogue at `/api/v1/part21/agent/dialogue`: every user/agent turn is persisted in MySQL, governed skills are selected and returned with their question contracts, graph traversal is read-only during intake, and finding drafts remain blocked from authoritative graph projection until qualified approval.
 - Agent intake creates or reuses one database-backed Kanban item, records user/agent/system communications and applied skill IDs on that item, exposes attachments in the same timeline, and maps Muse's “active” command to the persisted `in_progress` stage with skill activation.
+- The field board uses a reference-style five-column card layout with red “needs you” attention markers, drag/drop and arrow movement, an open-card detail drawer, timestamped communications, attachments, skill tags, and an in-board note entry backed by the same MySQL records.
 
 ## Architecture
 - React + TypeScript + Vite frontend with database-backed query state and audit-scoped projections.

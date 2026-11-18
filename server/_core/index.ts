@@ -11,7 +11,7 @@ import { buildAuditReadinessReport, exportBitemporalGraph, finalizeAuditReport, 
 import { approveRoutedFinalReport, listReportApprovalTasks, routeFinalReportApproval } from "../report-approval";
 import { listAssurancePeople } from "../people";
 import { listApprovalRules } from "../approval-rules";
-import { attachKanbanAsset, createKanbanItem, listKanbanItems, moveKanbanItem } from "../kanban-store";
+import { appendKanbanCommunication, attachKanbanAsset, createKanbanItem, listKanbanItems, moveKanbanItem } from "../kanban-store";
 import { ontologyStorageStatus, syncOntologySnapshot } from "../ontology-store";
 import { getReportDraft, registerEvidence } from "../evidence";
 import { assessControlledRemediationImpact, getControlledRegulatoryPack, traverseControlledRegulatoryTree } from "../regulatory-runtime";
@@ -177,6 +177,7 @@ async function startServer() {
   app.post("/api/kanban/items", async (req, res) => res.json(await createKanbanItem(req.body ?? {})));
   app.post("/api/kanban/items/:itemId/move", async (req, res) => res.json(await moveKanbanItem(req.params.itemId, req.body?.status, String(req.body?.actor ?? "Field operator"))));
   app.post("/api/kanban/items/:itemId/attachments", async (req, res) => res.json(await attachKanbanAsset({ ...(req.body ?? {}), itemId: req.params.itemId })));
+  app.post("/api/kanban/items/:itemId/communications", async (req, res) => res.json(await appendKanbanCommunication({ ...(req.body ?? {}), itemId: req.params.itemId, auditId: String(req.body?.auditId ?? ""), conversationId: String(req.body?.conversationId ?? `KANBAN-${req.params.itemId}`), role: req.body?.role === "agent" || req.body?.role === "system" ? req.body.role : "user", actor: String(req.body?.actor ?? "Field operator"), text: String(req.body?.text ?? ""), skillIds: Array.isArray(req.body?.skillIds) ? req.body.skillIds.map(String) : [] })));
   app.post("/api/reports/:auditId/approval-route", async (req, res) => { try { res.json(await routeFinalReportApproval(req.params.auditId, String(req.body?.personaId ?? ""), String(req.body?.routedBy ?? "Audit workflow"), String(req.body?.note ?? "Final report requires qualified human disposition."), { id: String(req.body?.personId ?? ""), name: String(req.body?.personName ?? ""), email: String(req.body?.personEmail ?? "") })); } catch (error) { res.status(409).json({ ok: false, error: error instanceof Error ? error.message : "Report routing failed" }); } });
   app.get("/api/reports/approvals", async (req, res) => res.json(await listReportApprovalTasks(typeof req.query.auditId === "string" ? req.query.auditId : undefined)));
   app.post("/api/reports/approvals/:approvalId/approve", async (req, res) => { try { res.json(await approveRoutedFinalReport(req.params.approvalId, String(req.body?.actor ?? ""), String(req.body?.note ?? ""))); } catch (error) { res.status(409).json({ ok: false, error: error instanceof Error ? error.message : "Report approval failed", authoritativeGraphWrite: false }); } });
