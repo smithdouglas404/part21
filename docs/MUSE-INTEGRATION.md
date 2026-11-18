@@ -131,3 +131,83 @@ The application-side MCP server and local bridge are implemented. The real exter
 
 - Meta Muse connector help: https://www.meta.com/help/superintelligence/1687253048996149/
 - Meta Muse Code extension and MCP configuration: https://dev.meta.ai/docs/muse-code/extending
+
+## Existing Studio gateway merge
+
+The application now includes a gateway mode for the existing `studio.innume.com` connector. In merged mode, the gateway:
+
+- Fetches the existing Studio OpenAPI document from `STUDIO_UPSTREAM_OPENAPI_URL`.
+- Publishes one combined OpenAPI document at `/api/v1/openapi.json`.
+- Keeps every existing Studio operation unchanged.
+- Adds the Part 21 operations under `/api/v1/part21/*` to avoid path and `operationId` collisions.
+- Proxies unmatched `/api/v1/*` requests to `STUDIO_UPSTREAM_BASE_URL`.
+- Preserves `Authorization`, `X-Client-Name`, and request IDs while forwarding.
+- Uses the database-backed Part 21 connector confirmation policy for writes: the first call returns HTTP 202 and `confirm=true` is required only after human approval.
+
+The gateway is intentionally fail-visible. It does not claim to be merged unless it is deployed at the Studio origin or mounted behind the Studio reverse proxy.
+
+### Server-side configuration
+
+Set these values in the deployment secret/configuration store; never put the bearer token in source control or chat:
+
+```text
+STUDIO_GATEWAY_MODE=merged
+STUDIO_UPSTREAM_BASE_URL=https://<private-or-internal-existing-studio-origin>
+STUDIO_UPSTREAM_OPENAPI_URL=https://<private-or-internal-existing-studio-origin>/api/v1/openapi.json
+STUDIO_PUBLIC_URL=https://studio.innume.com
+STUDIO_PART21_BEARER_TOKEN=<the same Studio token, entered as a protected secret>
+STUDIO_BRIDGE_ACTOR=<named connector actor>
+STUDIO_BRIDGE_ROLE=<authorized connector role>
+STUDIO_BRIDGE_ACCESS=make_changes
+```
+
+`STUDIO_PART21_BEARER_TOKEN` is compared by SHA-256 and is never returned by the application. The configured actor, role, audit scope, and access level are applied to Part 21 calls made with that shared token. If the Studio deployment cannot provide the same token to the Part 21 gateway, use a separate Part 21 token instead and keep the existing Studio connector unchanged.
+
+The merge status is visible at:
+
+```text
+GET https://studio.innume.com/api/v1/studio/merge-status
+```
+
+A successful merged deployment reports `mode: "merged"`, an upstream configuration, and `sharedBearerTokenConfigured: true`. The live OpenAPI document must contain paths such as:
+
+```text
+/api/v1/part21/field/kanban/list
+/api/v1/part21/field/kanban/create
+/api/v1/part21/field/kanban/move
+/api/v1/part21/field/kanban/attach
+/api/v1/part21/audit/brief
+```
+
+### Meta Muse after deployment
+
+Keep the existing Meta Muse custom connector pointed at:
+
+```text
+https://studio.innume.com/api/v1/openapi.json
+```
+
+Refresh the imported schema or recreate the connector after the merged deployment is live. Keep:
+
+```text
+Auth type: Bearer token
+Optional header: X-Client-Name: Meta Muse
+```
+
+Then test the read path:
+
+```text
+Show the field Kanban items waiting for review in audit AUD-026 using the Part 21 Assurance OS tools.
+```
+
+Test the human-gated write path:
+
+```text
+Create a high-priority field Kanban item for audit AUD-026 titled "Receiving record requires supervisor review".
+```
+
+Muse should first receive a confirmation preview. The item must not be written until the person approves and Muse repeats the same operation with `confirm: true`. The created item and `kanban_item_created` event are persisted in the Part 21 database.
+
+### Current boundary
+
+The gateway implementation and OpenAPI merge tests are in this project. This sandbox does not possess the private upstream origin, the `studio.innume.com` deployment binding, or the existing bearer token, so the domain-level cutover cannot be executed from here. The merge becomes live only when this gateway is deployed at the Studio origin or its reverse proxy is configured to route `/api/v1/part21/*` and `/api/v1/openapi.json` through it.

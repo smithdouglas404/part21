@@ -10,6 +10,21 @@ const writeTools = new Set(["field_kanban_create", "field_kanban_move", "field_k
 function bearer(req: Request) { const value = String(req.headers.authorization ?? ""); return value.startsWith("Bearer ") ? value.slice(7).trim() : ""; }
 function hash(value: string) { return crypto.createHash("sha256").update(value).digest("hex"); }
 
+function configuredStudioBridgeToken(): ConnectToken | undefined {
+  const raw = String(process.env.STUDIO_PART21_BEARER_TOKEN ?? "").trim();
+  if (!raw) return undefined;
+  return {
+    id: "STUDIO-BRIDGE-TOKEN",
+    tokenHash: hash(raw),
+    label: "Existing Studio bearer token",
+    actor: String(process.env.STUDIO_BRIDGE_ACTOR ?? "Studio connector actor"),
+    role: String(process.env.STUDIO_BRIDGE_ROLE ?? "Studio connector role"),
+    auditId: process.env.STUDIO_BRIDGE_AUDIT_ID ? String(process.env.STUDIO_BRIDGE_AUDIT_ID) : undefined,
+    access: process.env.STUDIO_BRIDGE_ACCESS === "make_changes" ? "make_changes" : "look_only",
+    createdAt: "server-configuration",
+  };
+}
+
 export async function createConnectToken(input: { label: string; actor: string; role: string; auditId?: string; access: "look_only" | "make_changes" }) {
   const raw = `p21_${crypto.randomBytes(24).toString("base64url")}`;
   const token: ConnectToken = { id: `CON-${Date.now()}`, tokenHash: hash(raw), label: input.label, actor: input.actor, role: input.role, auditId: input.auditId, access: input.access, createdAt: new Date().toISOString() };
@@ -22,7 +37,9 @@ export async function authenticateConnectRequest(req: Request) {
   const raw = bearer(req);
   if (!raw) return { ok: false as const, status: 401, error: "Bearer token required." };
   const tokens = await listDomainRecords<ConnectToken>("connect_token");
-  const token = tokens.find((candidate) => candidate.tokenHash === hash(raw) && !candidate.revokedAt);
+  const configuredToken = configuredStudioBridgeToken();
+  const token = tokens.find((candidate) => candidate.tokenHash === hash(raw) && !candidate.revokedAt)
+    ?? (configuredToken?.tokenHash === hash(raw) ? configuredToken : undefined);
   if (!token) return { ok: false as const, status: 401, error: "Invalid or revoked connector token." };
   return { ok: true as const, token };
 }

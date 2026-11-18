@@ -1,5 +1,6 @@
 import "dotenv/config";
 import express from "express";
+import type { Request, Response } from "express";
 import { createServer } from "http";
 import { createExpressMiddleware } from "@trpc/server/adapters/express";
 import { registerOAuthRoutes } from "./oauth";
@@ -25,13 +26,21 @@ import { approveWorkbookImport, compareSnapshots, getExcelAdapterStatus, importW
 import { handleMcpJsonRpc } from "../mcp-protocol";
 import { getEventStoreStatus, listAssuranceEvents } from "../event-store";
 import { runWeeklySourceSync } from "../weekly-sync";
-import { callConnectedTool, connectOpenApi, createConnectToken, listConnectTokens, revokeConnectToken } from "../connect-api";
+import { callConnectedTool, createConnectToken, listConnectTokens, revokeConnectToken } from "../connect-api";
 import { generateSyntheticPart21Decision, getDocumentControlStatus, listControlledDocuments, notarizeDocumentWithHederaDemo, registerControlledDocument, reviewDocumentCybersecurity } from "../document-control";
 import { getGroundedGraphContext, getGraphStoreStatus, validateGraphOntology } from "../graph-store";
 import { getDomainPortfolio, getDomainStoreStatus, listAudits } from "../domain-store";
 import { getConfigurationStoreStatus, getControlledConfiguration, listControlledConfigurations } from "../config-store";
+import { getMergedStudioOpenApi, getStudioGatewayStatus, studioProxyMiddleware } from "../studio-gateway";
 import { createContext } from "./context";
 import { serveStatic, setupVite } from "./vite";
+
+async function respondToConnectedTool(req: Request, res: Response, tool: string) {
+  const body = req.body && typeof req.body === "object" ? { ...req.body } as Record<string, unknown> : {};
+  const result = await callConnectedTool(req, tool, body, body.confirm === true);
+  if ("status" in result && result.status !== undefined) return res.status(result.status).json(result);
+  return res.json(result);
+}
 
 async function startServer() {
   const app = express();
@@ -64,7 +73,15 @@ async function startServer() {
     if (result === null || (Array.isArray(result) && result.length === 0)) return res.status(202).end();
     res.type("application/json").json(result);
   });
-  app.get("/api/v1/openapi.json", (req, res) => res.json(connectOpenApi(typeof process.env.STUDIO_PUBLIC_URL === "string" ? process.env.STUDIO_PUBLIC_URL : `${req.protocol}://${req.get("host")}`)));
+  app.get("/api/v1/studio/merge-status", (req, res) => res.json(getStudioGatewayStatus(`${req.protocol}://${req.get("host")}`)));
+  app.get("/api/v1/openapi.json", async (req, res) => {
+    const publicUrl = typeof process.env.STUDIO_PUBLIC_URL === "string" ? process.env.STUDIO_PUBLIC_URL : `${req.protocol}://${req.get("host")}`;
+    try {
+      res.json(await getMergedStudioOpenApi(publicUrl));
+    } catch (error) {
+      res.status(503).json({ ok: false, error: error instanceof Error ? error.message : "Merged Studio OpenAPI unavailable.", gateway: getStudioGatewayStatus(publicUrl) });
+    }
+  });
   app.post("/api/v1/connect/tokens", async (req, res) => {
     if (process.env.CONNECT_ADMIN_KEY && req.headers["x-connect-admin-key"] !== process.env.CONNECT_ADMIN_KEY) return res.status(403).json({ error: "Connector administration key required." });
     res.json(await createConnectToken({ label: String(req.body?.label ?? "Meta Muse"), actor: String(req.body?.actor ?? ""), role: String(req.body?.role ?? ""), auditId: req.body?.auditId ? String(req.body.auditId) : undefined, access: req.body?.access === "make_changes" ? "make_changes" : "look_only" }));
@@ -79,6 +96,18 @@ async function startServer() {
     if ("status" in result && result.status !== undefined) return res.status(result.status).json(result);
     res.json(result);
   });
+  // These paths are the stable merge surface advertised by the combined Studio OpenAPI document.
+  app.post("/api/v1/part21/field/kanban/list", async (req, res) => respondToConnectedTool(req, res, "field_kanban_list"));
+  app.post("/api/v1/part21/field/kanban/create", async (req, res) => respondToConnectedTool(req, res, "field_kanban_create"));
+  app.post("/api/v1/part21/field/kanban/move", async (req, res) => respondToConnectedTool(req, res, "field_kanban_move"));
+  app.post("/api/v1/part21/field/kanban/attach", async (req, res) => respondToConnectedTool(req, res, "field_kanban_attach"));
+  app.post("/api/v1/part21/audit/brief", async (req, res) => respondToConnectedTool(req, res, "check_audit_readiness"));
+  app.post("/api/v1/part21/excel/list-workbooks", async (req, res) => respondToConnectedTool(req, res, "excel_list_workbooks"));
+  app.post("/api/v1/part21/excel/import", async (req, res) => respondToConnectedTool(req, res, "excel_import_workbook"));
+  app.post("/api/v1/part21/excel/compare", async (req, res) => respondToConnectedTool(req, res, "excel_compare_revision"));
+  app.post("/api/v1/part21/excel/approve", async (req, res) => respondToConnectedTool(req, res, "excel_approve_import"));
+  app.post("/api/v1/part21/tools/:tool", async (req, res) => respondToConnectedTool(req, res, req.params.tool));
+  app.use("/api/v1", studioProxyMiddleware);
   app.get("/mcp", (_req, res) => res.json({ name: "part21-assurance-os", endpoint: "/mcp", transport: "Streamable HTTP", protocol: "MCP JSON-RPC 2.0", instructions: "POST initialize, tools/list, tools/call, resources/list, or resources/read requests to this endpoint." }));
   app.post("/mcp", async (req, res) => {
     const payload = req.body;

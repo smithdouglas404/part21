@@ -53,6 +53,9 @@
 - [x] **Demonstrate ledger notarization** — selected documents can produce a clickable, simulated Hedera topic/transaction/hash proof with the canonical payload shown in the UI; no real external transaction is claimed.
 - [ ] **Enable the remote weekly schedule** — platform ScheduleTask creation is blocked until the WebDev project is deployed; after deployment, create the Monday schedule against the weekly sync operation.
 
+- [x] **Implement the Studio-compatible Part 21 gateway** — merge the live Studio OpenAPI with collision-free `/api/v1/part21/*` Kanban, audit, workbook, and generic tool paths; preserve bearer headers; proxy unmatched Studio API calls; and keep write operations human-gated with HTTP 202 previews.
+- [ ] **Deploy the gateway at the existing Studio origin** — configure the private Studio upstream, protected shared bearer token, actor/role scope, and reverse-proxy or deployment binding so `studio.innume.com/api/v1/openapi.json` serves the combined contract. This cannot be marked complete from the separate Part 21 deployment without Studio-origin access.
+
 - [ ] **Promote workbook overlays into authoritative client graph entities** — add qualified ontology mapping, row-level identity resolution, relationship rules, and client approval before promotion.
 - [ ] **Move from demo-grounded chat to an approved provider runtime** — add provider adapter, model/prompt registry, evaluation set, guardrails, and production secret management.
 - [ ] **Complete production assurance hardening** — durable database, RBAC, immutable event log, validation/qualification evidence, cybersecurity review, retention, backup, and SME-approved applicability/interpretation overlays.
