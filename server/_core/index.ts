@@ -17,6 +17,7 @@ import { controlAgent, getAgentRegistry } from "../agent-runtime";
 import { getVendoredEccLibrary } from "../ecc-library";
 import { renderEmbeddedEccDashboard } from "../ecc-dashboard";
 import { buildPolicyGraph, compileDocumentToPolicy, evaluatePart21Policy, getPolicyCoverage, part21PolicyPack } from "../../shared/policy";
+import { compareSnapshots, getExcelAdapterStatus, importWorkbookPayload, listSampleWorkbooks, readWorkbookSample } from "../xlsx-adapter";
 import { createContext } from "./context";
 import { serveStatic, setupVite } from "./vite";
 
@@ -38,6 +39,11 @@ async function startServer() {
     const args = req.body?.arguments && typeof req.body.arguments === "object" ? req.body.arguments : {};
     res.json({ tool: name, data: callMcpTool(name, args) });
   });
+  app.get("/api/admin/excel/status", (_req, res) => res.json(getExcelAdapterStatus()));
+  app.get("/api/admin/excel/samples", (_req, res) => res.json(listSampleWorkbooks()));
+  app.get("/api/admin/excel/last", (_req, res) => res.json(readWorkbookSample()));
+  app.post("/api/admin/excel/upload", (req, res) => res.json(importWorkbookPayload({ filename: req.body?.filename, base64: req.body?.base64, actor: req.body?.actor, source: req.body?.source })));
+  app.get("/api/admin/excel/compare", (_req, res) => res.json({ ...getExcelAdapterStatus(), comparison: compareSnapshots(null) }));
   app.get("/api/agentkit/manifest", (_req, res) => {
     res.json(getAgentKitManifest());
   });

@@ -194,6 +194,11 @@ export const mcpTools: McpToolDefinition[] = [
   { name: "evaluate_supplier_risk", group: "Monitor", description: "Combine supplier changes, notification latency, evidence freshness, and findings into a review recommendation.", example: "{ supplierId: 'SUP-044', horizonDays: 90 }" },
   { name: "create_finding", group: "Act", description: "Create a human-reviewable finding draft with source links, severity rationale, and proposed owner.", example: "{ title: '...', sourceIds: ['EV-803'] }" },
   { name: "recommend_next_moves", group: "Assist", description: "Return ranked, explainable next actions for the current audit or selected graph context.", example: "{ context: 'AUD-026', limit: 5 }" },
+  { name: "excel_list_workbooks", group: "Excel adapter", description: "List synthetic workbooks available for supplier and audit-input simulation.", example: "{}" },
+  { name: "excel_describe_workbook", group: "Excel adapter", description: "Describe workbook sheets, row counts, SHA-256, and import state.", example: "{ workbookId: 'last-upload' }" },
+  { name: "excel_read_range", group: "Excel adapter", description: "Read normalized sample rows from the most recent workbook revision.", example: "{ sheet: 'Suppliers', limit: 25 }" },
+  { name: "excel_import_workbook", group: "Excel adapter", description: "Register an uploaded workbook revision and return a human-gated graph import proposal.", example: "{ filename: 'supplier.xlsx', base64: '…' }" },
+  { name: "excel_compare_revision", group: "Excel adapter", description: "Compare workbook revisions and show changed sheets or sample rows before graph import.", example: "{}" },
 ];
 
 export const metrics = {
@@ -214,4 +219,53 @@ export const agentPulse = {
 
 export function getGraphNode(id: string) {
   return graphNodes.find((node) => node.id === id) ?? graphNodes[2];
+}
+
+export const auditProjectionExtraNodes: GraphNode[] = [
+  { id: "req-21-31", label: "21.31", type: "requirement", meta: "Requirement", status: "Active", tone: "cyan", x: 104, y: 84, description: "Procurement documents must identify applicable Part 21 requirements and quality conditions." },
+  { id: "find-039", label: "F-039", type: "finding", meta: "Moderate finding", status: "Open", tone: "amber", x: 352, y: 304, description: "Supplier change notification arrived outside the control window." },
+  { id: "find-036", label: "F-036", type: "finding", meta: "Observation", status: "Open", tone: "amber", x: 352, y: 304, description: "Obsolete work instruction referenced by a traveler." },
+];
+
+export const auditProjectionExtraEdges: GraphEdge[] = [
+  { from: "req-21-31", to: "sup-044", label: "flows down to", tone: "cyan" },
+  { from: "sup-044", to: "find-039", label: "exposed to", tone: "red" },
+  { from: "req-21-51", to: "find-039", label: "tested by", tone: "blue" },
+  { from: "req-21-51", to: "find-036", label: "tested by", tone: "blue" },
+  { from: "ev-824", to: "find-036", label: "supports", tone: "green" },
+];
+
+export const auditProjectionMap: Record<string, { nodeIds: string[]; findingIds: string[] }> = {
+  "AUD-026": { nodeIds: ["req-21-51", "req-21-61", "prod-4820", "sup-044", "ev-771", "chg-2026-014", "per-lee", "find-042"], findingIds: ["F-042", "F-036", "F-44"] },
+  "AUD-021": { nodeIds: ["req-21-31", "req-21-51", "prod-4820", "sup-044", "ev-771", "chg-2026-014", "per-lee", "find-039"], findingIds: ["F-039", "F-44"] },
+  "AUD-019": { nodeIds: ["req-21-61", "find-042", "per-lee"], findingIds: ["F-042"] },
+  "AUD-017": { nodeIds: ["req-21-51", "req-21-61", "prod-4820", "ev-771", "per-lee"], findingIds: ["F-036"] },
+  "AUD-014": { nodeIds: ["req-21-51", "prod-4820", "chg-2026-014", "ev-771", "per-lee", "find-042"], findingIds: ["F-042"] },
+  "AUD-011": { nodeIds: ["req-21-51", "req-21-61", "ev-824", "per-lee", "find-036"], findingIds: ["F-036"] },
+  "AUD-008": { nodeIds: ["req-21-51", "prod-4820", "ev-803", "find-042"], findingIds: ["F-042"] },
+  "AUD-005": { nodeIds: ["req-21-31", "sup-044", "chg-2026-014", "per-lee", "find-039"], findingIds: ["F-039", "F-44"] },
+};
+
+export function getAuditGraphProjection(auditId: string) {
+  const projection = auditProjectionMap[auditId] ?? auditProjectionMap["AUD-026"];
+  const allNodes = [...graphNodes, ...auditProjectionExtraNodes];
+  const allEdges = [...graphEdges, ...auditProjectionExtraEdges];
+  const nodes = allNodes.filter((node) => projection.nodeIds.includes(node.id));
+  const nodeIds = new Set(nodes.map((node) => node.id));
+  return { nodes, edges: allEdges.filter((edge) => nodeIds.has(edge.from) && nodeIds.has(edge.to)), auditId };
+}
+
+const additionalAuditFindings: Record<string, FindingRecord[]> = {
+  "AUD-026": [{ id: "F-036", title: "Obsolete work instruction referenced by traveler", source: "Signal Watcher · WI-118", severity: "Observation", status: "Open", age: "21d", owner: "R. Gomez" }, { id: "F-44", title: "Supplier equivalency statement missing", source: "Supplier portal", severity: "Major", status: "Awaiting evidence", age: "6d", owner: "M. Lee" }],
+  "AUD-021": [{ id: "F-44", title: "Supplier equivalency statement missing", source: "Supplier portal", severity: "Major", status: "Awaiting evidence", age: "6d", owner: "M. Lee" }],
+  "AUD-019": [{ id: "F-042", title: "Receiving inspection cannot resolve heat-lot chain", source: "CAPA · NSS-4820", severity: "Major", status: "In remediation", age: "8d", owner: "M. Lee" }],
+  "AUD-014": [{ id: "F-042", title: "Receiving inspection cannot resolve heat-lot chain", source: "CHG-014 · NSS-4820", severity: "Major", status: "In remediation", age: "8d", owner: "R. Gomez" }],
+  "AUD-011": [{ id: "F-036", title: "Obsolete work instruction referenced by traveler", source: "Document control · WI-118", severity: "Observation", status: "Open", age: "21d", owner: "A. Patel" }],
+  "AUD-008": [{ id: "F-042", title: "Receiving inspection cannot resolve heat-lot chain", source: "Field records · NSS-4820", severity: "Major", status: "Awaiting evidence", age: "8d", owner: "T. Brooks" }],
+  "AUD-005": [{ id: "F-44", title: "Supplier equivalency statement missing", source: "Supplier portal", severity: "Major", status: "In remediation", age: "6d", owner: "M. Lee" }],
+};
+
+export function getFindingsForAudit(auditId: string) {
+  const base = findings.filter((finding) => finding.source.includes(auditId));
+  return [...base, ...(additionalAuditFindings[auditId] ?? [])];
 }

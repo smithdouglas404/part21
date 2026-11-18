@@ -13,6 +13,7 @@ import {
 import { getFindingOntologyContext, getTemporalHistory, part21Ontology, resolveOntology } from "../shared/ontology";
 import { assessRemediationImpact, part21RegulatoryPack, traverseRegulatoryTree } from "../shared/regulatory";
 import { compileDocumentToPolicy, evaluatePart21Policy, getPolicyCoverage, buildPolicyGraph } from "../shared/policy";
+import { importWorkbookPayload, listSampleWorkbooks, readWorkbookSample, compareSnapshots } from "./xlsx-adapter";
 
 export function getMcpManifest() {
   return {
@@ -94,6 +95,20 @@ export function callMcpTool(name: string, args: Record<string, unknown> = {}) {
       return { sources };
     case "get_findings":
       return { findings };
+    case "excel_list_workbooks":
+      return listSampleWorkbooks();
+    case "excel_describe_workbook":
+      return readWorkbookSample();
+    case "excel_read_range": {
+      const sample = readWorkbookSample();
+      const snapshot = (sample as any).snapshot;
+      const sheet = snapshot?.sheets?.find((item: any) => item.name === String(args.sheet ?? "")) ?? snapshot?.sheets?.[0];
+      return sheet ? { workbookId: snapshot.id, sheet: sheet.name, rows: sheet.sample.slice(0, Number(args.limit ?? 25)), provenance: snapshot.sha256 } : sample;
+    }
+    case "excel_import_workbook":
+      return importWorkbookPayload({ filename: String(args.filename ?? "uploaded-workbook.xlsx"), base64: String(args.base64 ?? ""), actor: String(args.actor ?? "MCP caller"), source: "MCP workbook adapter" });
+    case "excel_compare_revision":
+      return { comparison: compareSnapshots(null), humanGate: "Approve graph import before any entity or relationship mutation." };
     default:
       return { error: `Unknown tool: ${name}`, availableTools: mcpTools.map((tool) => tool.name) };
   }
