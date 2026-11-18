@@ -89,3 +89,23 @@ export function notarizeDocumentWithHederaDemo(documentId: string, actor = "Qual
   const event = appendAssuranceEvent({ type: "document.notarized", actor, entityId: documentId, auditId: document.auditIds[0], payload: { notarization, canonicalPayload: payload, warning: "Simulated Hedera testnet example; no external Hedera transaction was submitted." } });
   return { ok: true, documentId, notarization, canonicalPayload: payload, event, warning: "This is a demonstration hash and transaction shape. It is not a real Hedera transaction." };
 }
+
+export function generateSyntheticPart21Decision(documentId: string, actor = "Part 21 review agent") {
+  ensureSeeded();
+  const document = docs.get(documentId);
+  if (!document) return { ok: false, error: "Document not found." };
+  const decision = {
+    decisionId: `P21-DEC-${crypto.randomUUID().slice(0, 8).toUpperCase()}`,
+    documentId: document.id,
+    auditId: document.auditIds[0],
+    generatedAt: new Date().toISOString(),
+    status: "synthetic_demo_only" as const,
+    applicability: { outcome: "potentially_applicable", confidence: 0.82, basis: ["10 CFR 21.3 definition and scope context", "10 CFR 21.21 evaluation and notification decision path", "10 CFR 21.51 records and reporting support"] },
+    reportability: { outcome: "qualified_human_determination_required", rationale: "The synthetic record indicates a possible defect or noncompliance signal, but does not establish a substantial safety hazard or final reporting obligation.", recommendedNextStep: "Complete the Part 21 evaluation, document the technical basis, obtain quality/legal/regulatory review, and record the final disposition." },
+    evidenceBasis: [{ source: document.title, revision: document.revision, sha256: document.sha256 }, { source: "AUD-026 synthetic finding register", reference: "FIND-2026-04" }],
+    humanGates: ["Qualified nuclear/quality review", "Legal/compliance interpretation", "Authorized notification decision", "Immutable decision record"],
+    warning: "Synthetic generation for demonstration only. This is not a legal conclusion, NRC notification, or client-approved Part 21 determination."
+  };
+  const event = appendAssuranceEvent({ type: "part21.synthetic_decision_generated", actor, entityId: decision.decisionId, auditId: document.auditIds[0], payload: decision });
+  return { ok: true, decision, event };
+}

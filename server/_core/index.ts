@@ -21,7 +21,7 @@ import { approveWorkbookImport, compareSnapshots, getExcelAdapterStatus, importW
 import { handleMcpJsonRpc } from "../mcp-protocol";
 import { getEventStoreStatus, listAssuranceEvents } from "../event-store";
 import { runWeeklySourceSync } from "../weekly-sync";
-import { getDocumentControlStatus, listControlledDocuments, notarizeDocumentWithHederaDemo, registerControlledDocument, reviewDocumentCybersecurity } from "../document-control";
+import { generateSyntheticPart21Decision, getDocumentControlStatus, listControlledDocuments, notarizeDocumentWithHederaDemo, registerControlledDocument, reviewDocumentCybersecurity } from "../document-control";
 import { createContext } from "./context";
 import { serveStatic, setupVite } from "./vite";
 
@@ -60,6 +60,7 @@ async function startServer() {
   app.post("/api/documents", (req, res) => res.json(registerControlledDocument(req.body ?? {})));
   app.post("/api/documents/:documentId/cybersecurity-review", (req, res) => res.json(reviewDocumentCybersecurity(req.params.documentId, req.body ?? {})));
   app.post("/api/documents/:documentId/notarize", (req, res) => res.json(notarizeDocumentWithHederaDemo(req.params.documentId, String(req.body?.actor ?? "Quality approver"))));
+  app.post("/api/documents/:documentId/part21-decision", (req, res) => res.json(generateSyntheticPart21Decision(req.params.documentId, String(req.body?.actor ?? "Part 21 review agent"))));
   app.get("/api/admin/excel/status", (_req, res) => res.json(getExcelAdapterStatus()));
   app.get("/api/admin/excel/samples", (_req, res) => res.json(listSampleWorkbooks()));
   app.get("/api/admin/excel/last", (_req, res) => res.json(readWorkbookSample()));
