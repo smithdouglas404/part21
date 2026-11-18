@@ -1,0 +1,82 @@
+{
+  "source": "eCFR structure API",
+  "sourceUrl": "https://www.ecfr.gov/api/versioner/v1/structure/2026-11-09/title-10.json",
+  "asOfDate": "2026-11-09",
+  "claim": "Document hierarchy only; not executable rules or a nuclear operational knowledge graph",
+  "part21": {
+    "identifier": "21",
+    "label": "Part 21\u2014Reporting of Defects and Noncompliance",
+    "sections": [
+      {
+        "identifier": "21.1",
+        "label": "\u00a7 21.1 Purpose.",
+        "type": "section"
+      },
+      {
+        "identifier": "21.2",
+        "label": "\u00a7 21.2 Scope.",
+        "type": "section"
+      },
+      {
+        "identifier": "21.3",
+        "label": "\u00a7 21.3 Definitions.",
+        "type": "section"
+      },
+      {
+        "identifier": "21.4",
+        "label": "\u00a7 21.4 Interpretations.",
+        "type": "section"
+      },
+      {
+        "identifier": "21.5",
+        "label": "\u00a7 21.5 Communications.",
+        "type": "section"
+      },
+      {
+        "identifier": "21.6",
+        "label": "\u00a7 21.6 Posting requirements.",
+        "type": "section"
+      },
+      {
+        "identifier": "21.7",
+        "label": "\u00a7 21.7 Exemptions.",
+        "type": "section"
+      },
+      {
+        "identifier": "21.8",
+        "label": "\u00a7 21.8 Information collection requirements: OMB approval.",
+        "type": "section"
+      },
+      {
+        "identifier": "21.21",
+        "label": "\u00a7 21.21 Notification of failure to comply or existence of a defect and its evaluation.",
+        "type": "section"
+      },
+      {
+        "identifier": "21.31",
+        "label": "\u00a7 21.31 Procurement documents.",
+        "type": "section"
+      },
+      {
+        "identifier": "21.41",
+        "label": "\u00a7 21.41 Inspections.",
+        "type": "section"
+      },
+      {
+        "identifier": "21.51",
+        "label": "\u00a7 21.51 Maintenance and inspection of records.",
+        "type": "section"
+      },
+      {
+        "identifier": "21.61",
+        "label": "\u00a7 21.61 Failure to notify.",
+        "type": "section"
+      },
+      {
+        "identifier": "21.62",
+        "label": "\u00a7 21.62 Criminal penalties.",
+        "type": "section"
+      }
+    ]
+  }
+}

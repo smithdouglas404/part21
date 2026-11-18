@@ -1,7 +1,7 @@
 import crypto from "node:crypto";
 import { createPool, type Pool } from "mysql2/promise";
 
-export type ConfigurationKind = "policy" | "ontology" | "skill" | "persona" | "agent_route" | "connector" | "regulatory_source";
+export type ConfigurationKind = "policy" | "ontology" | "skill" | "persona" | "agent_route" | "connector" | "regulatory_source" | "skill_candidate" | "regulatory_source_candidate";
 export type ControlledConfiguration = { kind: ConfigurationKind; configId: string; version: string; payload: unknown; sourceSha256: string; status: "active" | "draft" | "retired"; approvedBy?: string | null; approvedAt?: string | null; updatedAt?: string };
 
 let pool: Pool | null = null;

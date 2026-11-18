@@ -1,3 +1,5 @@
+import { selectActiveConfigurationEntries, type ConfigurationCatalogEntry } from "@shared/configuration-selection";
+
 export let assurancePersonas: any[] = [];
 export let auditSkills: any[] = [];
 export let auditPhases: any[] = [];
@@ -11,8 +13,9 @@ export let regulatoryTraceForFinding: any = { path: [], violationHypothesis: "",
 let loaded = false;
 let loading: Promise<void> | null = null;
 
-async function payload(kind: string, configId: string) {
-  const response = await fetch(`/api/configuration/${kind}/${encodeURIComponent(configId)}`);
+async function payload(kind: string, configId: string, version?: string) {
+  const suffix = version ? `?version=${encodeURIComponent(version)}` : "";
+  const response = await fetch(`/api/configuration/${kind}/${encodeURIComponent(configId)}${suffix}`);
   if (!response.ok) throw new Error(`Controlled configuration unavailable: ${kind}/${configId}`);
   return (await response.json()).payload;
 }
@@ -25,8 +28,8 @@ export async function loadControlledConfiguration() {
       if (!response.ok) throw new Error("Controlled configuration catalog unavailable");
       return response.json();
     });
-    const records = catalog.configurations as Array<{ kind: string; configId: string }>;
-    const readMany = async (kind: string) => Promise.all(records.filter((record) => record.kind === kind).map((record) => payload(record.kind, record.configId)));
+    const records = catalog.configurations as ConfigurationCatalogEntry[];
+    const readMany = async (kind: string) => Promise.all(selectActiveConfigurationEntries(records, kind).map((record) => payload(record.kind, record.configId, record.version)));
     [assurancePersonas, agentKitAgents, mcpConnectors, auditSkills] = await Promise.all([readMany("persona"), readMany("agent_route"), readMany("connector"), readMany("skill")]);
     auditPhases = auditSkills.find((item) => item.id === "audit-phases") ?? [];
     auditSkills = auditSkills.filter((item) => item.id !== "audit-phases");
@@ -35,7 +38,8 @@ export async function loadControlledConfiguration() {
     regulatoryTraceForFinding = { path: ["Database finding", ...(part21RegulatoryPack.sections ?? []).slice(0, 3).map((section: any) => `§${section.id}`), "Human gate"], violationHypothesis: firstSection?.summary ?? "Controlled regulatory source loaded from MySQL.", risk: firstSection?.defaultRisk ?? "Review required", impactIfNotRemediated: firstSection?.ifUnmet ?? "Qualified review required.", remediation: part21RegulatoryPack.implementationGuidance?.map((item: any) => item.title ?? item.summary ?? String(item)) ?? [] };
     loaded = true;
   })();
-  return loading;
+  try { await loading; }
+  catch (error) { loading = null; throw error; }
 }
 
 export function controlledConfigurationLoaded() { return loaded; }

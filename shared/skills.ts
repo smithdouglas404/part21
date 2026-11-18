@@ -21,6 +21,10 @@ export interface AuditSkill {
   humanGate: string;
   questions: AuditQuestion[];
   completionSignal: string;
+  regulatoryRefs?: string[];
+  domain?: "part21" | "appendix-b" | "nuclear-overlay";
+  requiredEvidence?: string[];
+  clockPolicy?: { id: string; trigger: string; duration: string; deadlineBasis: "calendar_days" | "working_days" | "human_gate" }[];
 }
 
 export interface AgentKitAgent {
