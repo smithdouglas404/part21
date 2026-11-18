@@ -345,7 +345,7 @@ async function startServer() {
   app.get("/api/part21/cases/:caseId", async (req, res) => withPrincipal(req, res, async () => { const auditId = String(req.query.auditId ?? ""); const principal = await principalOrReadOnly(req, auditId); const view = await getPart21Case(auditId, req.params.caseId, principal, calendarFrom(req));
       let supervision: any = null;
       if (process.env.PART21_AUTO_SUPERVISE === "true" && await temporalIsConfigured()) {
-        try { supervision = await supervisePart21Case(view as any, principal.actor, "Part 21 baseline recorded at supervision: Mon-Fri working calendar with US federal holidays, 60/30/2-day statutory durations."); }
+        try { supervision = await supervisePart21Case(view as any, principal as any, "Part 21 baseline recorded at supervision: Mon-Fri working calendar with US federal holidays, 60/30/2-day statutory durations."); }
         catch (error) { supervision = { bound: false, error: error instanceof Error ? error.message : "Supervision unavailable" }; }
       }
       return { ...view, supervision }; }));
