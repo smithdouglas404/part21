@@ -18,6 +18,8 @@ import { getVendoredEccLibrary } from "../ecc-library";
 import { renderEmbeddedEccDashboard } from "../ecc-dashboard";
 import { buildPolicyGraph, compileDocumentToPolicy, evaluatePart21Policy, getPolicyCoverage, part21PolicyPack } from "../../shared/policy";
 import { compareSnapshots, getExcelAdapterStatus, importWorkbookPayload, listSampleWorkbooks, readWorkbookSample } from "../xlsx-adapter";
+import { handleMcpJsonRpc } from "../mcp-protocol";
+import { getEventStoreStatus, listAssuranceEvents } from "../event-store";
 import { createContext } from "./context";
 import { serveStatic, setupVite } from "./vite";
 
@@ -39,6 +41,15 @@ async function startServer() {
     const args = req.body?.arguments && typeof req.body.arguments === "object" ? req.body.arguments : {};
     res.json({ tool: name, data: callMcpTool(name, args) });
   });
+  app.get("/mcp", (_req, res) => res.json({ name: "part21-assurance-os", endpoint: "/mcp", transport: "Streamable HTTP", protocol: "MCP JSON-RPC 2.0", instructions: "POST initialize, tools/list, tools/call, resources/list, or resources/read requests to this endpoint." }));
+  app.post("/mcp", async (req, res) => {
+    const payload = req.body;
+    const result = Array.isArray(payload) ? (await Promise.all(payload.map(handleMcpJsonRpc))).filter(Boolean) : await handleMcpJsonRpc(payload);
+    if (result === null || (Array.isArray(result) && result.length === 0)) return res.status(202).end();
+    res.type("application/json").json(result);
+  });
+  app.get("/api/events/status", (_req, res) => res.json(getEventStoreStatus()));
+  app.get("/api/events", (req, res) => res.json(listAssuranceEvents({ type: typeof req.query.type === "string" ? req.query.type : undefined, entityId: typeof req.query.entityId === "string" ? req.query.entityId : undefined, auditId: typeof req.query.auditId === "string" ? req.query.auditId : undefined })));
   app.get("/api/admin/excel/status", (_req, res) => res.json(getExcelAdapterStatus()));
   app.get("/api/admin/excel/samples", (_req, res) => res.json(listSampleWorkbooks()));
   app.get("/api/admin/excel/last", (_req, res) => res.json(readWorkbookSample()));

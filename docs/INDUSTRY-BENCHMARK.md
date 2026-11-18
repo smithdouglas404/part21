@@ -11,7 +11,7 @@ The new workbook adapter is operational for local `.xlsx` files. It can offer sy
 The most important remaining work is not visual. It is production assurance infrastructure:
 
 1. Client-owned system connectors are not connected. Quality, supplier ERP, document control, field data, directory/roles, and configuration systems still need authenticated adapters, source ownership, identity resolution, freshness SLAs, and permission boundaries.
-2. Workbook revisions are parsed and diffed, but they do not yet mutate a persistent graph. A qualified user must review and approve the proposed entity/relationship changes, after which an immutable event should be written to durable storage.
+2. Workbook revisions are parsed, diffed, and persisted as a durable bitemporal workbook overlay after approval. They do not yet promote automatically into authoritative client graph entities. A qualified user and ontology-mapping rule must review that promotion.
 3. The demo state is partly in memory and deterministic. Production needs durable audit, finding, evidence, graph, policy, skill-run, decision, and agent-event tables; RBAC; immutable audit logs; retention; backup; and concurrency controls.
 4. The current AI chat demonstrates dynamic skill routing and grounded fallback responses, but it does not yet invoke a production LLM provider in the default demo. An approved provider adapter, prompt/version registry, model evaluation set, safety filters, and cost/latency controls are still required.
 5. Part 21 policy rules are a traceable application model, not a legal determination. Client applicability, interpretation overlays, safety-significance decisions, reportability, and final notifications require qualified nuclear, quality, legal, and compliance review.

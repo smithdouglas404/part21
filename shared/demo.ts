@@ -199,6 +199,8 @@ export const mcpTools: McpToolDefinition[] = [
   { name: "excel_read_range", group: "Excel adapter", description: "Read normalized sample rows from the most recent workbook revision.", example: "{ sheet: 'Suppliers', limit: 25 }" },
   { name: "excel_import_workbook", group: "Excel adapter", description: "Register an uploaded workbook revision and return a human-gated graph import proposal.", example: "{ filename: 'supplier.xlsx', base64: '…' }" },
   { name: "excel_compare_revision", group: "Excel adapter", description: "Compare workbook revisions and show changed sheets or sample rows before graph import.", example: "{}" },
+  { name: "excel_import_local_workbook", group: "Excel adapter", description: "Import a workbook by filename from the configured EXCEL_ROOT directory and return a hashed human-gated revision proposal.", example: "{ filename: 'supplier-notifications.xlsx', actor: 'Field auditor' }" },
+  { name: "excel_approve_import", group: "Excel adapter", description: "Record human approval for the current workbook revision before any graph mutation adapter is allowed.", example: "{ workbookId: 'WB-20261118010000', actor: 'Quality approver' }" },
 ];
 
 export const metrics = {

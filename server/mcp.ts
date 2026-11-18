@@ -13,14 +13,21 @@ import {
 import { getFindingOntologyContext, getTemporalHistory, part21Ontology, resolveOntology } from "../shared/ontology";
 import { assessRemediationImpact, part21RegulatoryPack, traverseRegulatoryTree } from "../shared/regulatory";
 import { compileDocumentToPolicy, evaluatePart21Policy, getPolicyCoverage, buildPolicyGraph } from "../shared/policy";
-import { importWorkbookPayload, listSampleWorkbooks, readWorkbookSample, compareSnapshots } from "./xlsx-adapter";
+import { approveWorkbookImport, importLocalWorkbook, importWorkbookPayload, listLocalWorkbooks, listSampleWorkbooks, readWorkbookSample, compareSnapshots } from "./xlsx-adapter";
 
 export function getMcpManifest() {
   return {
     name: "part21-assurance-demo",
-    version: "0.1.0-demo",
+    version: "1.0.0-mcp",
     dataMode: "synthetic",
-    description: "MCP-style adapter surface for a Part 21 assurance prototype.",
+    description: "Part 21 Assurance OS MCP server. Local Excel directory access is active; client-owned enterprise connectors are configuration-ready.",
+    connectors: [
+      { id: "excel-local-directory", label: "Excel / local directory", status: "connected", transport: "streamable-http + stdio", configuration: "EXCEL_ROOT" },
+      { id: "sap-erp", label: "SAP ERP", status: "configure_later", transport: "MCP or OData", configuration: "SAP_MCP_URL / secret manager" },
+      { id: "salesforce-supplier", label: "Salesforce supplier relationship", status: "configure_later", transport: "MCP or REST", configuration: "SALESFORCE_MCP_URL / OAuth" },
+      { id: "document-control", label: "Document control repository", status: "configure_later", transport: "MCP or REST", configuration: "DOCUMENT_REPOSITORY_MCP_URL / OAuth" },
+      { id: "configuration-management", label: "Configuration management", status: "configure_later", transport: "MCP or API", configuration: "CONFIGURATION_MCP_URL / OAuth" },
+    ],
     tools: mcpTools,
   };
 }
@@ -96,7 +103,7 @@ export function callMcpTool(name: string, args: Record<string, unknown> = {}) {
     case "get_findings":
       return { findings };
     case "excel_list_workbooks":
-      return listSampleWorkbooks();
+      return { ...listLocalWorkbooks(), samples: listSampleWorkbooks().samples };
     case "excel_describe_workbook":
       return readWorkbookSample();
     case "excel_read_range": {
@@ -107,8 +114,12 @@ export function callMcpTool(name: string, args: Record<string, unknown> = {}) {
     }
     case "excel_import_workbook":
       return importWorkbookPayload({ filename: String(args.filename ?? "uploaded-workbook.xlsx"), base64: String(args.base64 ?? ""), actor: String(args.actor ?? "MCP caller"), source: "MCP workbook adapter" });
+    case "excel_import_local_workbook":
+      return importLocalWorkbook(String(args.filename ?? ""), String(args.actor ?? "MCP local caller"));
     case "excel_compare_revision":
       return { comparison: compareSnapshots(null), humanGate: "Approve graph import before any entity or relationship mutation." };
+    case "excel_approve_import":
+      return approveWorkbookImport(String(args.workbookId ?? ""), String(args.actor ?? "MCP caller"), String(args.note ?? "Approved after human review"));
     default:
       return { error: `Unknown tool: ${name}`, availableTools: mcpTools.map((tool) => tool.name) };
   }

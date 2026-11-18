@@ -360,3 +360,15 @@ kbd { margin-left: auto; border: 1px solid #2d4358; padding: 2px 5px; border-rad
 .skill-invocation-details summary { cursor: pointer; color: #7adce5; font-size: 10px; font-weight: 700; }
 .skill-invocation-details div { display: grid; gap: 4px; margin-top: 8px; }
 .skill-invocation-details small { color: #8ca6bc; line-height: 1.4; }
+.connector-registry { padding: 16px 20px; border: 1px solid #243e54; border-radius: 11px; background: #0f1a27; }
+.connector-registry-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.connector-registry-head strong { display: block; margin-top: 4px; font-size: 13px; }
+.connector-registry-list { display: grid; gap: 7px; margin-top: 12px; }
+.connector-row { display: flex; align-items: center; gap: 10px; padding: 9px 10px; border: 1px solid #20364b; border-radius: 7px; background: #0c1622; }
+.connector-row > div { flex: 1; }
+.connector-row strong, .connector-row small { display: block; }
+.connector-row strong { font-size: 11px; }
+.connector-row small { margin-top: 3px; color: #7e96ae; font-size: 10px; }
+.connector-dot { width: 7px; height: 7px; flex: none; border-radius: 50%; }
+.connector-dot.online { background: #65d9a0; box-shadow: 0 0 0 4px #65d9a01c; }
+.connector-dot.planned { background: #6c8aaa; box-shadow: 0 0 0 4px #6c8aaa1c; }

@@ -44,8 +44,11 @@
 - [x] **Show dynamic skill invocation in chat** — chat returns the skill route, contract, invocation mode, human gate, grounding, and adaptive follow-up questions.
 - [x] **Create reusable skill** — packaged at `/home/ubuntu/skills/part21-assurance-application-builder`.
 - [x] **Document honest gaps and benchmark** — see `docs/INDUSTRY-BENCHMARK.md`.
+- [x] **Expose a standard MCP server** — `/mcp` supports JSON-RPC `initialize`, `tools/list`, `tools/call`, `resources/list`, and `resources/read`; `mcp:stdio` supports local Claude-style clients.
+- [x] **Connect Excel to a local directory** — `EXCEL_ROOT` discovery and `excel_import_local_workbook` are live through both transports.
+- [x] **Persist approved workbook overlays** — append-only bitemporal events are stored under `PART21_DATA_DIR` after human approval.
+- [x] **Show future enterprise adapters** — SAP ERP, Salesforce supplier relationships, document control, and configuration-management connector slots are visible as configure-later boundaries.
 
-- [ ] **Replace local workbook parser with a live client-hosted Excel MCP server** — wire authentication, allowed directories, read/write permissions, and source-owned workbook identity.
-- [ ] **Persist approved workbook imports into the bitemporal graph** — current upload stops at a human-gated proposal and does not mutate durable graph state.
+- [ ] **Promote workbook overlays into authoritative client graph entities** — add qualified ontology mapping, row-level identity resolution, relationship rules, and client approval before promotion.
 - [ ] **Move from demo-grounded chat to an approved provider runtime** — add provider adapter, model/prompt registry, evaluation set, guardrails, and production secret management.
 - [ ] **Complete production assurance hardening** — durable database, RBAC, immutable event log, validation/qualification evidence, cybersecurity review, retention, backup, and SME-approved applicability/interpretation overlays.
