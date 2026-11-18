@@ -6,18 +6,6 @@ type DocumentRecord = { id: string; title: string; documentNumber: string; revis
 
 async function ensureDocumentSeeds() {
   await ensureDomainStore();
-  const existing = await listDomainRecords<DocumentRecord>("document");
-  if (existing.length) return;
-  const seeds = [
-    { title: "Supplier notification procedure", documentNumber: "PROC-SUP-021", revision: "C", tags: ["supplier", "Part 21", "controlled-procedure"], auditIds: ["AUD-026"], classification: "controlled" as const },
-    { title: "NSS-4820 baseline acceptance record", documentNumber: "REC-NSS-4820", revision: "B", tags: ["genealogy", "baseline", "evidence"], auditIds: ["AUD-026", "AUD-021"], classification: "restricted" as const },
-  ];
-  for (const seed of seeds) {
-    const content = Buffer.from(`${seed.documentNumber}|${seed.revision}|${seed.title}`);
-    const receivedAt = "2026-11-10T14:00:00.000Z";
-    const record: DocumentRecord = { id: `DOC-${seed.documentNumber}`, title: seed.title, documentNumber: seed.documentNumber, revision: seed.revision, mimeType: "application/pdf", sizeBytes: content.length, sha256: crypto.createHash("sha256").update(content).digest("hex"), source: "database document seed", auditIds: seed.auditIds, tags: seed.tags, receivedAt, effectiveDate: "2026-11-10", status: "controlled", retention: { policy: "Nuclear QA controlled record · 10 years", retainUntil: "2036-11-10", legalHold: false, disposition: "review_at_end_of_period" }, cybersecurity: { status: "reviewed", classification: seed.classification, controls: ["access logging", "least privilege", "malware scan", "integrity hash"], reviewer: "Security & Quality", reviewedAt: "2026-11-11T09:00:00.000Z" }, contentBase64: content.toString("base64") };
-    await upsertDomainRecord({ recordType: "document", recordId: record.id, auditId: seed.auditIds[0], payload: record, content });
-  }
 }
 
 export async function listControlledDocuments(filters: { auditId?: string } = {}) { await ensureDocumentSeeds(); const documents = await listDomainRecords<DocumentRecord>("document"); return documents.filter((doc) => !filters.auditId || doc.auditIds.includes(filters.auditId)).map(({ contentBase64: _content, ...safe }) => safe); }

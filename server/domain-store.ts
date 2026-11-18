@@ -1,6 +1,5 @@
 import crypto from "node:crypto";
 import { createPool, type Pool } from "mysql2/promise";
-import { audits, controls, evidence, findings, metrics, sources, graphNodes } from "../shared/demo";
 
 type DomainRecord = { recordType: string; recordId: string; auditId?: string | null; payload: unknown };
 let pool: Pool | null = null;
@@ -17,25 +16,6 @@ export async function ensureDomainStore() {
   const db = getPool();
   await db.query(`CREATE TABLE IF NOT EXISTS part21_domain_records (record_type VARCHAR(80) NOT NULL, record_id VARCHAR(180) NOT NULL, audit_id VARCHAR(180) NULL, payload JSON NOT NULL, content_sha256 VARCHAR(64) NULL, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP, PRIMARY KEY (record_type, record_id), INDEX idx_domain_audit (audit_id), INDEX idx_domain_type (record_type))`);
   initialized = true;
-  await seedDomainRecords();
-}
-
-async function seedDomainRecords() {
-  const db = getPool();
-  const [rows] = await db.query<any[]>("SELECT COUNT(*) AS count FROM part21_domain_records");
-  if (Number(rows[0]?.count ?? 0) > 0) return;
-  const seed = [
-    ...audits.map((item) => ({ recordType: "audit", recordId: item.id, auditId: item.id, payload: item })),
-    ...findings.map((item) => ({ recordType: "finding", recordId: item.id, auditId: "AUD-026", payload: item })),
-    ...evidence.map((item) => ({ recordType: "evidence", recordId: item.id, auditId: "AUD-026", payload: item })),
-    ...controls.map((item) => ({ recordType: "control", recordId: item.id, auditId: "AUD-026", payload: item })),
-    ...sources.map((item) => ({ recordType: "source", recordId: item.name, auditId: "AUD-026", payload: item })),
-    { recordType: "metric", recordId: "AUD-026", auditId: "AUD-026", payload: metrics },
-    ...graphNodes.filter((node) => node.type === "supplier").map((node) => ({ recordType: "supplier", recordId: node.id, auditId: "AUD-026", payload: node })),
-    ...graphNodes.filter((node) => node.type === "change").map((node) => ({ recordType: "change", recordId: node.id, auditId: "AUD-026", payload: node })),
-    ...graphNodes.filter((node) => node.type === "product").map((node) => ({ recordType: "product", recordId: node.id, auditId: "AUD-026", payload: node })),
-  ];
-  for (const item of seed) await upsertDomainRecord(item);
 }
 
 export async function upsertDomainRecord(record: DomainRecord & { content?: Buffer }) {

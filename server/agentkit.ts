@@ -99,7 +99,7 @@ export async function buildAuditReadinessReport(auditId = "AUD-026") {
     reportType: "audit-readiness",
     reportVersion: "0.1-demo",
     generatedAt: new Date().toISOString(),
-    dataMode: "synthetic",
+    dataMode: "database-resident synthetic dataset",
     audit,
     executivePosition: "Ready with actions",
     metrics: domainMetrics,

@@ -28,7 +28,7 @@ function resultContent(value: unknown, isError = false) {
 export async function handleMcpJsonRpc(message: any) {
   const id = message?.id ?? null;
   const method = String(message?.method ?? "");
-  if (method === "initialize") return { jsonrpc: "2.0", id, result: { protocolVersion: "2025-06-18", capabilities: { tools: { listChanged: false }, resources: { subscribe: false, listChanged: false } }, serverInfo: { name: "part21-assurance-os", version: "1.0.0" }, instructions: "Part 21 assurance MCP server. Synthetic data is active until client connectors are configured. Human review is required before graph mutation, reporting, or notification." } };
+  if (method === "initialize") return { jsonrpc: "2.0", id, result: { protocolVersion: "2025-06-18", capabilities: { tools: { listChanged: false }, resources: { subscribe: false, listChanged: false } }, serverInfo: { name: "part21-assurance-os", version: "1.0.0" }, instructions: "Part 21 assurance MCP server. Operational records come from the database. Synthetic data is available only through explicit administrator demo loading. Human review is required before graph mutation, reporting, or notification." } };
   if (method === "notifications/initialized") return null;
   if (method === "ping") return { jsonrpc: "2.0", id, result: {} };
   if (method === "tools/list") return { jsonrpc: "2.0", id, result: { tools: standardTools() } };
@@ -42,7 +42,7 @@ export async function handleMcpJsonRpc(message: any) {
     const name = String(message?.params?.name ?? "");
     const args = message?.params?.arguments && typeof message.params.arguments === "object" ? message.params.arguments : {};
     try {
-      const value = callMcpTool(name, args);
+      const value = await callMcpTool(name, args);
       return { jsonrpc: "2.0", id, result: resultContent(value, Boolean((value as any)?.error)) };
     } catch (error) {
       return { jsonrpc: "2.0", id, result: resultContent({ error: error instanceof Error ? error.message : "Tool execution failed" }, true) };

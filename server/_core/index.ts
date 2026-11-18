@@ -22,7 +22,7 @@ import { handleMcpJsonRpc } from "../mcp-protocol";
 import { getEventStoreStatus, listAssuranceEvents } from "../event-store";
 import { runWeeklySourceSync } from "../weekly-sync";
 import { generateSyntheticPart21Decision, getDocumentControlStatus, listControlledDocuments, notarizeDocumentWithHederaDemo, registerControlledDocument, reviewDocumentCybersecurity } from "../document-control";
-import { getGroundedGraphContext, graphStoreStatus, syncGraphSeed } from "../graph-store";
+import { getGroundedGraphContext, getGraphStoreStatus } from "../graph-store";
 import { getDomainPortfolio, getDomainStoreStatus, listAudits } from "../domain-store";
 import { createContext } from "./context";
 import { serveStatic, setupVite } from "./vite";
@@ -43,10 +43,10 @@ async function startServer() {
   app.get("/api/mcp/tools", (_req, res) => {
     res.json(getMcpManifest());
   });
-  app.post("/api/mcp/call", (req, res) => {
+  app.post("/api/mcp/call", async (req, res) => {
     const name = typeof req.body?.name === "string" ? req.body.name : "";
     const args = req.body?.arguments && typeof req.body.arguments === "object" ? req.body.arguments : {};
-    res.json({ tool: name, data: callMcpTool(name, args) });
+    res.json({ tool: name, data: await callMcpTool(name, args) });
   });
   app.get("/mcp", (_req, res) => res.json({ name: "part21-assurance-os", endpoint: "/mcp", transport: "Streamable HTTP", protocol: "MCP JSON-RPC 2.0", instructions: "POST initialize, tools/list, tools/call, resources/list, or resources/read requests to this endpoint." }));
   app.post("/mcp", async (req, res) => {
@@ -94,9 +94,8 @@ async function startServer() {
   app.get("/api/regulatory/trace", (req, res) => res.json(traverseRegulatoryTree(typeof req.query.findingId === "string" ? req.query.findingId : undefined)));
   app.get("/api/regulatory/impact", (req, res) => res.json(assessRemediationImpact(typeof req.query.findingId === "string" ? req.query.findingId : undefined)));
   app.get("/api/ai/status", (_req, res) => res.json(getAiStatus()));
-  app.get("/api/graph/store/status", async (_req, res) => res.json(await graphStoreStatus()));
+  app.get("/api/graph/store/status", async (_req, res) => res.json(await getGraphStoreStatus()));
   app.get("/api/graph/context", async (req, res) => res.json(await getGroundedGraphContext(typeof req.query.findingId === "string" ? req.query.findingId : "FIND-2026-04")));
-  app.post("/api/graph/store/sync", async (_req, res) => res.json(await syncGraphSeed()));
   app.post("/api/ai/ask", async (req, res) => {
     const question = String(req.body?.question ?? "");
     if (req.body?.mode === "live") {

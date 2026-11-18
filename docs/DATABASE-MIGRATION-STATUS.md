@@ -25,9 +25,9 @@ The live grounded AI path now reads graph nodes, edges, and temporal events from
 
 Evidence intake, controlled-document registration, cybersecurity review, Hedera-style notarization metadata, Part 21 decision generation, readiness reports, report drafts, and weekly synchronization all use the database-backed domain store.
 
-## Seed behavior
+## Population behavior
 
-The initial environment is bootstrapped once from the existing synthetic catalog when `part21_domain_records` is empty. After bootstrap, reads and writes go to MySQL. The seed is initialization data, not a runtime fallback. Client-owned records must replace these initial records before qualification.
+The application contains no startup seed, demo-load endpoint, or graph-sync population path. The current synthetic records were populated once outside the application runtime so the demonstration has data in MySQL and the graph tables. After that one-time population, reads and writes go to MySQL. Client-owned records can replace the demonstration records through the normal workbook, document, ERP, supplier, and connector ingestion paths.
 
 ## Static by design
 

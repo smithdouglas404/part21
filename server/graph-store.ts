@@ -1,6 +1,4 @@
 import { createPool, Pool } from "mysql2/promise";
-import { graphEdges, graphNodes } from "../shared/demo";
-import { temporalRecords } from "../shared/ontology";
 
 let pool: Pool | null = null;
 let initialized = false;
@@ -27,27 +25,21 @@ export async function ensureGraphStore() {
   return { configured: true, source: "mysql-database", tables: ["part21_graph_nodes", "part21_graph_edges", "part21_graph_events"] };
 }
 
-export async function syncGraphSeed() {
+export async function getGraphStoreStatus() {
   const status = await ensureGraphStore();
   const db = getPool();
-  for (const node of graphNodes) {
-    await db.query(`INSERT IGNORE INTO part21_graph_nodes (id, node_type, label, subtitle, status, payload) VALUES (?, ?, ?, ?, ?, ?)`, [node.id, node.type, node.label, node.meta ?? null, node.status ?? null, JSON.stringify(node)]);
-  }
-  for (const edge of graphEdges) {
-    const id = `${edge.from}-${edge.to}-${edge.label}`;
-    await db.query(`INSERT IGNORE INTO part21_graph_edges (id, from_id, to_id, relation, label, payload) VALUES (?, ?, ?, ?, ?, ?)`, [id, edge.from, edge.to, edge.label, edge.label, JSON.stringify(edge)]);
-  }
-  for (const record of temporalRecords) {
-    const id = `${record.entityId}-${record.validFrom}-${record.operation}`;
-    await db.query(`INSERT IGNORE INTO part21_graph_events (id, entity_id, valid_from, valid_to, recorded_at, recorded_by, operation, payload) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`, [id, record.entityId, record.validFrom, record.validTo ?? null, record.recordedAt, record.recordedBy, record.operation, JSON.stringify(record.payload)]);
-  }
-  return { ...status, insertedNodes: graphNodes.length, insertedEdges: graphEdges.length, insertedEvents: temporalRecords.length };
+  const [[nodes], [edges], [events]] = await Promise.all([
+    db.query<any[]>("SELECT COUNT(*) AS count FROM part21_graph_nodes"),
+    db.query<any[]>("SELECT COUNT(*) AS count FROM part21_graph_edges"),
+    db.query<any[]>("SELECT COUNT(*) AS count FROM part21_graph_events"),
+  ]);
+  return { ...status, insertedNodes: 0, insertedEdges: 0, insertedEvents: 0, databaseCounts: { nodes: Number(nodes[0]?.count ?? 0), edges: Number(edges[0]?.count ?? 0), events: Number(events[0]?.count ?? 0) }, ingestionRequired: true };
 }
 
 export async function getGroundedGraphContext(findingId = "FIND-2026-04") {
   const status = await ensureGraphStore();
   const db = getPool();
-  await syncGraphSeed();
+  await ensureGraphStore();
   const [nodes] = await db.query<any[]>(`SELECT id, node_type AS type, label, subtitle, status, payload FROM part21_graph_nodes ORDER BY id`);
   const [edges] = await db.query<any[]>(`SELECT id, from_id AS \`from\`, to_id AS \`to\`, relation, label, payload FROM part21_graph_edges ORDER BY id`);
   const [events] = await db.query<any[]>(`SELECT entity_id AS entityId, valid_from AS validFrom, valid_to AS validTo, recorded_at AS recordedAt, recorded_by AS recordedBy, operation, payload FROM part21_graph_events ORDER BY valid_from, recorded_at`);
@@ -57,8 +49,4 @@ export async function getGroundedGraphContext(findingId = "FIND-2026-04") {
 function parseJson(value: unknown) {
   if (typeof value !== "string") return value ?? {};
   try { return JSON.parse(value); } catch { return {}; }
-}
-
-export async function graphStoreStatus() {
-  return syncGraphSeed();
 }
