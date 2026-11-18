@@ -1,0 +1,16 @@
+{
+  "mcpServers": {
+    "part21-assurance-os": {
+      "command": "pnpm",
+      "args": [
+        "--dir",
+        "/absolute/path/to/part21ops",
+        "mcp:stdio"
+      ],
+      "env": {
+        "EXCEL_ROOT": "/absolute/path/to/your/excel-directory",
+        "PART21_DATA_DIR": "/absolute/path/to/part21ops/data"
+      }
+    }
+  }
+}

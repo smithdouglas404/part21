@@ -372,3 +372,14 @@ kbd { margin-left: auto; border: 1px solid #2d4358; padding: 2px 5px; border-rad
 .connector-dot { width: 7px; height: 7px; flex: none; border-radius: 50%; }
 .connector-dot.online { background: #65d9a0; box-shadow: 0 0 0 4px #65d9a01c; }
 .connector-dot.planned { background: #6c8aaa; box-shadow: 0 0 0 4px #6c8aaa1c; }
+.weekly-sync-panel { display: grid; grid-template-columns: 1fr auto; gap: 14px 20px; align-items: center; padding: 16px 20px; border: 1px solid #28526a; border-radius: 11px; background: linear-gradient(110deg, #102b3c, #101c2b); }
+.weekly-sync-panel h3 { margin: 5px 0 5px; font-size: 14px; }
+.weekly-sync-panel p { max-width: 720px; margin: 0; color: #94afc0; font-size: 11px; line-height: 1.45; }
+.weekly-sync-result { grid-column: 1 / -1; display: flex; align-items: center; gap: 15px; padding-top: 12px; border-top: 1px solid #2b5064; }
+.weekly-sync-result div { display: grid; gap: 3px; }
+.weekly-sync-result strong { color: #73dbe5; font-family: "IBM Plex Mono", monospace; font-size: 12px; }
+.weekly-sync-result small { color: #8299ae; font-size: 9px; }
+.weekly-sync-result .ghost-button { margin-left: auto; }
+.spin { animation: spin 1s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+@media (max-width: 700px) { .weekly-sync-panel { grid-template-columns: 1fr; } .weekly-sync-result { flex-wrap: wrap; } .weekly-sync-result .ghost-button { margin-left: 0; } }

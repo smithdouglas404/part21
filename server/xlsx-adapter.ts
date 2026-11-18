@@ -53,6 +53,21 @@ export function listLocalWorkbooks() {
   return { root: excelRoot, files, adapter: getExcelAdapterStatus() };
 }
 
+export function syncLocalWorkbooks(actor = "Weekly source synchronization") {
+  const files = listLocalWorkbooks().files;
+  const importedEvents = listAssuranceEvents({ type: "excel.workbook_imported" });
+  const results = files.map((file) => {
+    const buffer = fs.readFileSync(file.path);
+    const sha256 = crypto.createHash("sha256").update(buffer).digest("hex");
+    const prior = importedEvents.slice().reverse().find((event) => (event.payload.snapshot as WorkbookSnapshot | undefined)?.name === file.filename);
+    const priorSnapshot = prior?.payload.snapshot as WorkbookSnapshot | undefined;
+    if (priorSnapshot?.sha256 === sha256) return { filename: file.filename, status: "unchanged", sha256, priorWorkbookId: priorSnapshot.id };
+    const imported = importLocalWorkbook(file.filename, actor) as any;
+    return { filename: file.filename, status: imported.ok ? "changed_and_imported" : "error", sha256, workbookId: imported.ok ? imported.snapshot.id : undefined, diff: imported.ok ? imported.diff : undefined, error: imported.ok ? undefined : imported.error };
+  });
+  return { root: excelRoot, checkedAt: new Date().toISOString(), filesChecked: files.length, results, humanGate: "Changed workbook revisions require qualified human approval before authoritative graph promotion." };
+}
+
 export function listSampleWorkbooks() {
   return { samples: sampleWorkbooks, adapter: getExcelAdapterStatus() };
 }

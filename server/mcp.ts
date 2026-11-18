@@ -14,6 +14,7 @@ import { getFindingOntologyContext, getTemporalHistory, part21Ontology, resolveO
 import { assessRemediationImpact, part21RegulatoryPack, traverseRegulatoryTree } from "../shared/regulatory";
 import { compileDocumentToPolicy, evaluatePart21Policy, getPolicyCoverage, buildPolicyGraph } from "../shared/policy";
 import { approveWorkbookImport, importLocalWorkbook, importWorkbookPayload, listLocalWorkbooks, listSampleWorkbooks, readWorkbookSample, compareSnapshots } from "./xlsx-adapter";
+import { runWeeklySourceSync } from "./weekly-sync";
 
 export function getMcpManifest() {
   return {
@@ -120,6 +121,8 @@ export function callMcpTool(name: string, args: Record<string, unknown> = {}) {
       return { comparison: compareSnapshots(null), humanGate: "Approve graph import before any entity or relationship mutation." };
     case "excel_approve_import":
       return approveWorkbookImport(String(args.workbookId ?? ""), String(args.actor ?? "MCP caller"), String(args.note ?? "Approved after human review"));
+    case "run_weekly_source_sync":
+      return runWeeklySourceSync(String(args.actor ?? "MCP scheduler"));
     default:
       return { error: `Unknown tool: ${name}`, availableTools: mcpTools.map((tool) => tool.name) };
   }

@@ -20,6 +20,7 @@ import { buildPolicyGraph, compileDocumentToPolicy, evaluatePart21Policy, getPol
 import { compareSnapshots, getExcelAdapterStatus, importWorkbookPayload, listSampleWorkbooks, readWorkbookSample } from "../xlsx-adapter";
 import { handleMcpJsonRpc } from "../mcp-protocol";
 import { getEventStoreStatus, listAssuranceEvents } from "../event-store";
+import { runWeeklySourceSync } from "../weekly-sync";
 import { createContext } from "./context";
 import { serveStatic, setupVite } from "./vite";
 
@@ -50,6 +51,7 @@ async function startServer() {
   });
   app.get("/api/events/status", (_req, res) => res.json(getEventStoreStatus()));
   app.get("/api/events", (req, res) => res.json(listAssuranceEvents({ type: typeof req.query.type === "string" ? req.query.type : undefined, entityId: typeof req.query.entityId === "string" ? req.query.entityId : undefined, auditId: typeof req.query.auditId === "string" ? req.query.auditId : undefined })));
+  app.post("/api/sync/weekly", (req, res) => res.json(runWeeklySourceSync(String(req.body?.actor ?? "Application weekly scheduler"))));
   app.get("/api/admin/excel/status", (_req, res) => res.json(getExcelAdapterStatus()));
   app.get("/api/admin/excel/samples", (_req, res) => res.json(listSampleWorkbooks()));
   app.get("/api/admin/excel/last", (_req, res) => res.json(readWorkbookSample()));

@@ -80,6 +80,12 @@ The MCP server exposes tools for:
 
 The manifest also shows configured-later connector slots for SAP ERP, Salesforce supplier relationships, document control repositories, and configuration-management systems. These are intentionally visible but not falsely marked as connected.
 
+## Weekly synchronization
+
+The application exposes `run_weekly_source_sync` through MCP and `POST /api/sync/weekly` for an application scheduler. The operation is idempotent for unchanged local workbooks and returns readiness, policy coverage, supplier-risk status, changed files, and pending enterprise connectors.
+
+The platform ScheduleTask was not created in this sandbox because the project is not deployed; the platform returned `project not deployed yet`. After deployment, create one weekly Monday schedule that invokes this operation. Until then, use the Administration panel's **Run weekly sync now** control or invoke `run_weekly_source_sync` from the MCP client.
+
 ## Safety boundary
 
 Workbook reads and revision proposals are available to the MCP client. Graph mutation, report filing, notification, and final Part 21 interpretation remain human-gated. The system labels synthetic data, provider state, and connector status in responses so Claude cannot mistake the demonstration environment for a qualified client system.

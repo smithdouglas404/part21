@@ -201,6 +201,7 @@ export const mcpTools: McpToolDefinition[] = [
   { name: "excel_compare_revision", group: "Excel adapter", description: "Compare workbook revisions and show changed sheets or sample rows before graph import.", example: "{}" },
   { name: "excel_import_local_workbook", group: "Excel adapter", description: "Import a workbook by filename from the configured EXCEL_ROOT directory and return a hashed human-gated revision proposal.", example: "{ filename: 'supplier-notifications.xlsx', actor: 'Field auditor' }" },
   { name: "excel_approve_import", group: "Excel adapter", description: "Record human approval for the current workbook revision before any graph mutation adapter is allowed.", example: "{ workbookId: 'WB-20261118010000', actor: 'Quality approver' }" },
+  { name: "run_weekly_source_sync", group: "Scheduled compliance", description: "Synchronize changed local supplier workbooks, evaluate audit readiness and policy coverage, and list enterprise connectors still awaiting configuration.", example: "{ actor: 'Weekly scheduler' }" },
 ];
 
 export const metrics = {

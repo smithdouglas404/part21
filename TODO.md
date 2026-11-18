@@ -48,6 +48,8 @@
 - [x] **Connect Excel to a local directory** — `EXCEL_ROOT` discovery and `excel_import_local_workbook` are live through both transports.
 - [x] **Persist approved workbook overlays** — append-only bitemporal events are stored under `PART21_DATA_DIR` after human approval.
 - [x] **Show future enterprise adapters** — SAP ERP, Salesforce supplier relationships, document control, and configuration-management connector slots are visible as configure-later boundaries.
+- [x] **Implement weekly sync logic** — `run_weekly_source_sync` and `/api/sync/weekly` are idempotent for unchanged workbooks and report readiness, policy coverage, supplier risk, and pending connectors.
+- [ ] **Enable the remote weekly schedule** — platform ScheduleTask creation is blocked until the WebDev project is deployed; after deployment, create the Monday schedule against the weekly sync operation.
 
 - [ ] **Promote workbook overlays into authoritative client graph entities** — add qualified ontology mapping, row-level identity resolution, relationship rules, and client approval before promotion.
 - [ ] **Move from demo-grounded chat to an approved provider runtime** — add provider adapter, model/prompt registry, evaluation set, guardrails, and production secret management.
