@@ -1,5 +1,5 @@
 import { Pool } from "pg";
-import { part21Ontology } from "../shared/ontology";
+import { getControlledConfiguration } from "./config-store";
 
 const connectionString = process.env.POSTGRES_URL;
 const pool = connectionString ? new Pool({ connectionString, max: 5 }) : null;
@@ -26,5 +26,6 @@ export async function ontologyStorageStatus() {
 export async function syncOntologySnapshot() {
   if (!pool) throw new Error("POSTGRES_URL is required; ontology synchronization cannot use fixture data.");
   for (const statement of schemaStatements) await pool.query(statement);
-  return { ...(await ontologyStorageStatus()), ontologyVersion: part21Ontology.version, insertedEntities: 0, insertedTemporalEvents: 0, note: "Ontology records must be ingested from configured client systems; no fixture synchronization is performed." };
+  const ontology = (await getControlledConfiguration<any>("ontology", "part21-assurance-ontology")).payload;
+  return { ...(await ontologyStorageStatus()), ontologyVersion: ontology.version, insertedEntities: 0, insertedTemporalEvents: 0, note: "Ontology records must be ingested from configured client systems; no fixture synchronization is performed." };
 }

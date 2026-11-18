@@ -1,25 +1,20 @@
 import { mcpTools } from "../shared/demo";
-import { getControlledConfiguration } from "./config-store";
-import { assessRemediationImpact, part21RegulatoryPack, traverseRegulatoryTree } from "../shared/regulatory";
+import { getControlledConfiguration, listControlledConfigurationPayloads } from "./config-store";
+import { assessControlledRemediationImpact, getControlledRegulatoryPack, traverseControlledRegulatoryTree } from "./regulatory-runtime";
 import { buildControlledPolicyGraph, compileControlledDocumentToPolicy, evaluateControlledPolicy, getControlledPolicyCoverage } from "./policy-runtime";
 import { approveWorkbookImport, importLocalWorkbook, importWorkbookPayload, listLocalWorkbooks, listSampleWorkbooks, readWorkbookSample, compareSnapshots } from "./xlsx-adapter";
 import { runWeeklySourceSync } from "./weekly-sync";
 import { getGroundedGraphContext } from "./graph-store";
 import { getDomainPortfolio, upsertDomainRecord } from "./domain-store";
 
-export function getMcpManifest() {
+export async function getMcpManifest() {
+  const configuredConnectors = await listControlledConfigurationPayloads<any>("connector");
   return {
     name: "part21-assurance-demo",
     version: "1.0.0-mcp",
     dataMode: "client-owned-database-required",
     description: "Part 21 Assurance OS MCP server. Operational tools read client-owned database and graph records; unconnected sources return explicit TBD states.",
-    connectors: [
-      { id: "excel-local-directory", label: "Excel / local directory", status: "connected", transport: "streamable-http + stdio", configuration: "EXCEL_ROOT" },
-      { id: "sap-erp", label: "SAP ERP", status: "configure_later", transport: "MCP or OData", configuration: "SAP_MCP_URL / secret manager" },
-      { id: "salesforce-supplier", label: "Salesforce supplier relationship", status: "configure_later", transport: "MCP or REST", configuration: "SALESFORCE_MCP_URL / OAuth" },
-      { id: "document-control", label: "Document control repository", status: "configure_later", transport: "MCP or REST", configuration: "DOCUMENT_REPOSITORY_MCP_URL / OAuth" },
-      { id: "configuration-management", label: "Configuration management", status: "configure_later", transport: "MCP or API", configuration: "CONFIGURATION_MCP_URL / OAuth" },
-    ],
+    connectors: configuredConnectors.map((item) => item.payload),
     tools: mcpTools,
   };
 }
@@ -47,9 +42,9 @@ export async function callMcpTool(name: string, args: Record<string, unknown> = 
     case "temporal_findings_query":
       return { findingId: args.findingId ?? "", temporalModel: (await getControlledConfiguration<any>("ontology", "part21-assurance-ontology")).payload.temporalModel, history: (await getGroundedGraphContext(String(args.findingId ?? ""))).temporalEvents, asOf: args.asOf ?? new Date().toISOString(), source: "mysql-database" };
     case "traverse_regulatory_tree":
-      return traverseRegulatoryTree(String(args.findingId ?? ""));
+      return traverseControlledRegulatoryTree(String(args.findingId ?? ""));
     case "assess_remediation_impact":
-      return assessRemediationImpact(String(args.findingId ?? ""));
+      return assessControlledRemediationImpact(String(args.findingId ?? ""));
     case "policy_evaluate":
       return evaluateControlledPolicy(String(args.findingId ?? ""), String(args.asOf ?? new Date().toISOString().slice(0, 10)));
     case "policy_coverage":
@@ -59,8 +54,9 @@ export async function callMcpTool(name: string, args: Record<string, unknown> = 
     case "policy_compile":
       return compileControlledDocumentToPolicy(String(args.documentId ?? "10-cfr-part-21"));
     case "recommend_remediation": {
-      const impact = assessRemediationImpact(String(args.findingId ?? ""));
-      return { ...impact, recommendationBasis: "Part 21 source pack + client-approved interpretation overlay required", sourceLinks: part21RegulatoryPack.sources, recommendations: impact.remediation.map((step, index) => ({ priority: index + 1, action: step, evidenceToClose: "Attach source record and accountable approval", humanGate: "Compliance / quality approval required" })) };
+      const impact = await assessControlledRemediationImpact(String(args.findingId ?? ""));
+      const pack = await getControlledRegulatoryPack();
+      return { ...impact, recommendationBasis: "Part 21 source pack + client-approved interpretation overlay required", sourceLinks: pack.sources, recommendations: impact.remediation.map((step: string, index: number) => ({ priority: index + 1, action: step, evidenceToClose: "Attach source record and accountable approval", humanGate: "Compliance / quality approval required" })) };
     }
     case "trace_product_genealogy": {
       const context = await getGroundedGraphContext(String(args.findingId ?? ""));

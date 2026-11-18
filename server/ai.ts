@@ -1,11 +1,10 @@
-import { regulatoryTraceForFinding } from "../shared/regulatory";
 
 import type { AuditSkill } from "../shared/skills";
 import { invokeLLM } from "./_core/llm";
 import { getGroundedGraphContext } from "./graph-store";
 import { getDomainPortfolio } from "./domain-store";
 import { appendAssuranceEvent } from "./event-store";
-import { listControlledConfigurationPayloads } from "./config-store";
+import { getControlledConfiguration, listControlledConfigurationPayloads } from "./config-store";
 
 const sandboxEnvironmentProvider: "openai" | "anthropic" | null = process.env.OPENAI_API_KEY ? "openai" : process.env.ANTHROPIC_API_KEY ? "anthropic" : null;
 let configuredProvider: "openai" | "anthropic" | null = null;
@@ -32,6 +31,9 @@ export async function answerGroundedQuestion(question: string, auditId?: string,
   const graphFinding = context.nodes.find((node: any) => node.type === "finding" || node.nodeType === "finding");
   const finding = (portfolio.findings as any[]).find((item) => !findingId || item.id === findingId) ?? (portfolio.findings as any[])[0] ?? (graphFinding ? { id: graphFinding.id, title: graphFinding.label, severity: graphFinding.status, owner: "Database graph accountability record" } : null);
   if (!finding) throw new Error("No database finding is available in the relational or graph projection.");
+  const regulatoryPack = (await getControlledConfiguration<any>("regulatory_source", "10-cfr-part-21")).payload;
+  const firstSection = regulatoryPack.sections?.[0];
+  const regulatoryTraceForFinding = { path: [finding.id, activeAudit?.id ?? "database-audit-context", ...(regulatoryPack.sections ?? []).slice(0, 3).map((section: any) => `§${section.id}`)], violationHypothesis: firstSection?.summary ?? "Controlled regulatory source loaded from MySQL.", risk: firstSection?.defaultRisk ?? "Review required", impactIfNotRemediated: firstSection?.ifUnmet ?? "Qualified review required.", remediation: regulatoryPack.implementationGuidance ?? [] };
   const regulatoryTrace = { ...regulatoryTraceForFinding, findingId: finding.id, path: [finding.id, activeAudit?.id ?? "database-audit-context", ...regulatoryTraceForFinding.path.filter((segment) => !/^AUD-/.test(segment)).slice(2)] };
   const groundedContext = context.findingId === finding.id ? context : await getGroundedGraphContext(finding.id);
   const history = groundedContext.temporalEvents;

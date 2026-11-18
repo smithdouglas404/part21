@@ -1,25 +1,32 @@
-import { auditPhases, auditSkills, agentKitAgents, getSkillForPhase } from "../shared/skills";
-import { mcpConnectors, type SimulationStep } from "../shared/execution";
-import { part21Ontology } from "../shared/ontology";
-import { assessRemediationImpact, part21RegulatoryPack, traverseRegulatoryTree } from "../shared/regulatory";
+import type { AuditSkill, AuditSkillPhase } from "../shared/skills";
+import type { SimulationStep } from "../shared/execution";
 import { getEccCatalog } from "../shared/ecc";
-import { part21PolicyPack } from "../shared/policy";
 import { getDomainPortfolio, listAudits } from "./domain-store";
 import { getGroundedGraphContext } from "./graph-store";
+import { getControlledConfiguration, listControlledConfigurationPayloads } from "./config-store";
 
-export function getAgentKitManifest() {
+export async function getAgentKitManifest() {
+  const [agents, skills, phases, connectors, ontology, regulatory, policy] = await Promise.all([
+    listControlledConfigurationPayloads<any>("agent_route"),
+    listControlledConfigurationPayloads<AuditSkill>("skill"),
+    getControlledConfiguration<any>("skill", "audit-phases"),
+    listControlledConfigurationPayloads<any>("connector"),
+    getControlledConfiguration<any>("ontology", "part21-assurance-ontology"),
+    getControlledConfiguration<any>("regulatory_source", "10-cfr-part-21"),
+    getControlledConfiguration<any>("policy", "part21-policy-as-code"),
+  ]);
   return {
     protocol: "agentkit-demo",
     version: "0.1.0",
     executionContract: { standard: "ECC-compatible open-source skill module", source: getEccCatalog().repository, localSkillPack: getEccCatalog().localPack },
-    agents: agentKitAgents,
-    skills: auditSkills.map(({ questions, ...skill }) => ({ ...skill, questionCount: questions.length })),
-    phases: auditPhases,
-    connectors: mcpConnectors,
-    ontology: { id: part21Ontology.id, version: part21Ontology.version, temporalModel: part21Ontology.temporalModel, classCount: part21Ontology.classes.length, relationCount: part21Ontology.relations.length },
+    agents: agents.map((item) => item.payload),
+    skills: skills.filter((item) => item.configId !== "audit-phases").map((item) => ({ ...(item.payload as any), questionCount: (item.payload as any).questions?.length ?? 0, configurationVersion: item.version, sourceSha256: item.sourceSha256 })),
+    phases: phases.payload,
+    connectors: connectors.map((item) => item.payload),
+    ontology: { id: ontology.payload.id, version: ontology.payload.version, temporalModel: ontology.payload.temporalModel, classCount: ontology.payload.classes.length, relationCount: ontology.payload.relations.length },
     storage: { provider: "PostgreSQL", connectionEnv: "POSTGRES_URL", tables: ["ontology_entities", "ontology_relationships", "temporal_events", "audit_decisions"], syncEndpoint: "/api/ontology/sync" },
-    regulatoryPack: { id: part21RegulatoryPack.id, title: part21RegulatoryPack.title, sectionCount: part21RegulatoryPack.sections.length, sources: part21RegulatoryPack.sources, clientInterpretationRequired: true },
-    policyAsCode: { id: part21PolicyPack.id, version: part21PolicyPack.policyVersion, ruleCount: part21PolicyPack.rules.length, sourceUri: part21PolicyPack.sourceUri },
+    regulatoryPack: { id: regulatory.payload.id, title: regulatory.payload.title, sectionCount: regulatory.payload.sections.length, sources: regulatory.payload.sources, clientInterpretationRequired: true, configurationVersion: regulatory.version },
+    policyAsCode: { id: policy.payload.id, version: policy.payload.policyVersion, ruleCount: policy.payload.rules.length, sourceUri: policy.payload.sourceUri, configurationVersion: policy.version },
   };
 }
 
@@ -42,8 +49,10 @@ export async function simulateFullAuditExecution(findingId?: string): Promise<{ 
   return { finding, status: "completed", steps };
 }
 
-export function runAuditSkill(skillId: string, answers: Record<string, unknown> = {}) {
-  const skill = auditSkills.find((item) => item.id === skillId) ?? auditSkills[0];
+export async function runAuditSkill(skillId: string, answers: Record<string, unknown> = {}) {
+  const skills = (await listControlledConfigurationPayloads<AuditSkill>("skill")).map((item) => item.payload).filter((item) => item.id !== "audit-phases");
+  const skill = skills.find((item) => item.id === skillId) ?? skills[0];
+  if (!skill) throw new Error("No active audit skill exists in the controlled configuration repository.");
   const answered = skill.questions.filter((question) => answers[question.id] !== undefined && String(answers[question.id]).trim().length > 0).length;
   const required = skill.questions.filter((question) => question.required).length;
   return {
@@ -52,7 +61,7 @@ export function runAuditSkill(skillId: string, answers: Record<string, unknown> 
     agent: skill.agent,
     status: answered >= required ? "ready_for_human_gate" : "needs_more_context",
     completion: Math.round((answered / skill.questions.length) * 100),
-    skillContract: { id: (skill as any).skillContract, evidence: "linked synthetic records", context: skill.purpose, humanGate: skill.humanGate },
+    skillContract: { id: (skill as any).skillContract, evidence: "linked database records", context: skill.purpose, humanGate: skill.humanGate },
     nextQuestions: skill.questions.filter((question) => question.required && !answers[question.id]).map((question) => question.id),
     recommendation: answered >= required ? skill.completionSignal : `Answer the remaining ${Math.max(required - answered, 0)} required question(s) before routing to the human gate.`,
   };
@@ -64,6 +73,8 @@ export async function buildAuditReadinessReport(auditId?: string) {
   if (!portfolio.audit) throw new Error(`Audit ${auditId} was not found in the database.`);
   const audit = portfolio.audit as any;
   const domainMetrics = portfolio.metrics as any;
+  const firstFinding = (portfolio.findings as any[])[0];
+  const firstChange = (portfolio.changes as any[])[0];
   return {
     reportType: "audit-readiness",
     reportVersion: "0.1-demo",
@@ -76,7 +87,7 @@ export async function buildAuditReadinessReport(auditId?: string) {
     findings: portfolio.findings,
     evidence: portfolio.evidence,
     sources: portfolio.sources,
-    agentRecommendation: "Resolve F-042 evidence chain before accepting CHG-014 into the configuration baseline.",
+    agentRecommendation: firstFinding ? `Resolve ${firstFinding.id} evidence chain before accepting ${firstChange?.id ?? "the next database change"} into the configuration baseline.` : "Resolve the highest-priority database finding before accepting the next configuration change.",
     humanDecisionsRequired: ["Confirm scope", "Accept evidence sufficiency", "Approve finding severity", "Approve report disposition"],
     traceabilityNote: "This report preserves links to synthetic source records and is not a regulatory determination.",
   };
@@ -91,9 +102,9 @@ export function reportToCsv(report: Awaited<ReturnType<typeof buildAuditReadines
   return rows.map((row) => row.map((cell) => `"${String(cell ?? "").replaceAll('"', '""')}"`).join(",")).join("\n");
 }
 
-export function getSkillPhaseFromId(skillId: string) {
-  const skill = auditSkills.find((item) => item.id === skillId);
-  return getSkillForPhase(skill?.phase ?? "scope");
+export async function getSkillPhaseFromId(skillId: string): Promise<AuditSkillPhase | undefined> {
+  const skills = (await listControlledConfigurationPayloads<AuditSkill>("skill")).map((item) => item.payload);
+  return skills.find((item) => item.id === skillId)?.phase;
 }
 
 export interface CustomFindingInput {

@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import { upsertDomainRecord, listDomainRecords, getDomainPortfolio } from "./domain-store";
-import { assessRemediationImpact, regulatoryTraceForFinding } from "../shared/regulatory";
+import { assessControlledRemediationImpact, traverseControlledRegulatoryTree } from "./regulatory-runtime";
 
 type EvidenceRecord = { id: string; name: string; mimeType: string; size: number; tags: string[]; linkedFinding: string; status: string; receivedAt: string; sha256: string; storage: string; auditId: string; contentBase64?: string };
 
@@ -19,7 +19,8 @@ export async function getReportDraft(findingId?: string, auditId?: string) {
   const portfolio = await getDomainPortfolio(auditId);
   const finding = portfolio.findings.find((item: any) => item.id === findingId) ?? portfolio.findings[0];
   const linkedUploads = portfolio.evidence.filter((item: any) => item.linkedFinding === findingId).map(({ contentBase64: _content, ...safe }: any) => safe);
-  const impact = assessRemediationImpact(findingId);
+  const impact = await assessControlledRemediationImpact(findingId);
+  const regulatoryTraceForFinding = await traverseControlledRegulatoryTree(findingId);
   return { reportType: "audit-report-draft", findingId, generatedAt: new Date().toISOString(), dataSource: "mysql-database", sections: { executiveSummary: `Audit ${auditId} has a database-backed finding requiring action before baseline acceptance.`, condition: finding?.title ?? "Condition pending auditor input", regulatoryBasis: { regulation: "10 CFR Part 21", sections: regulatoryTraceForFinding.path, violationHypothesis: regulatoryTraceForFinding.violationHypothesis, sourceLinks: ["https://www.ecfr.gov/current/title-10/chapter-I/part-21"] }, riskAndImpact: { risk: impact.risk, impactIfNotRemediated: impact.impactIfNotRemediated }, criteria: ["21.51 identification and traceability", "21.61 nonconforming articles and corrective action"], evidenceBasis: linkedUploads, auditorNarrative: "Add auditor narrative, sampling method, and interview notes here.", correctiveAction: { recommendedSteps: impact.remediation, auditorEdits: "Add owner, due date, effectiveness test, and evidence request." }, recommendation: "Resolve the database-backed evidence chain before accepting the configuration baseline.", linkedUploads }, humanGate: "Auditor edits, client-approved regulatory interpretation, and quality approver acceptance required before issue" };
 }
 

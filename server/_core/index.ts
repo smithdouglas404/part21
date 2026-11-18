@@ -9,7 +9,7 @@ import { callMcpTool, getMcpManifest } from "../mcp";
 import { buildAuditReadinessReport, exportBitemporalGraph, getAgentActivity, getAgentKitManifest, reportToCsv, runAuditSkill, simulateCustomAuditExecution, simulateFullAuditExecution } from "../agentkit";
 import { ontologyStorageStatus, syncOntologySnapshot } from "../ontology-store";
 import { getReportDraft, registerEvidence } from "../evidence";
-import { assessRemediationImpact, part21RegulatoryPack, traverseRegulatoryTree } from "../../shared/regulatory";
+import { assessControlledRemediationImpact, getControlledRegulatoryPack, traverseControlledRegulatoryTree } from "../regulatory-runtime";
 import { acknowledgeComplianceWarning, answerGroundedQuestion, answerLiveGroundedQuestion, configureAiProvider, getAiStatus } from "../ai";
 import { getEccCatalog, getEmbeddedEccModule } from "../../shared/ecc";
 import { decideGovernanceItem, getGovernanceBoard, moveGovernanceItem } from "../../shared/governance";
@@ -44,8 +44,8 @@ async function startServer() {
   app.get("/api/platform/config.js", (_req, res) => {
     res.set("Cache-Control", "no-store").type("application/javascript").send(publicPlatformScript());
   });
-  app.get("/api/mcp/tools", (_req, res) => {
-    res.json(getMcpManifest());
+  app.get("/api/mcp/tools", async (_req, res) => {
+    res.json(await getMcpManifest());
   });
   app.post("/api/mcp/call", async (req, res) => {
     const name = typeof req.body?.name === "string" ? req.body.name : "";
@@ -75,11 +75,11 @@ async function startServer() {
   app.get("/api/admin/excel/last", async (_req, res) => res.json(await readWorkbookSample()));
   app.post("/api/admin/excel/upload", async (req, res) => res.json(await importWorkbookPayload({ filename: req.body?.filename, base64: req.body?.base64, actor: req.body?.actor, source: req.body?.source })));
   app.get("/api/admin/excel/compare", async (_req, res) => res.json({ ...(await getExcelAdapterStatus()), comparison: compareSnapshots(null, (await readWorkbookSample() as any).snapshot ?? null) }));
-  app.get("/api/agentkit/manifest", (_req, res) => {
-    res.json(getAgentKitManifest());
+  app.get("/api/agentkit/manifest", async (_req, res) => {
+    res.json(await getAgentKitManifest());
   });
-  app.post("/api/agentkit/run", (req, res) => {
-    res.json(runAuditSkill(String(req.body?.skillId ?? ""), req.body?.answers ?? {}));
+  app.post("/api/agentkit/run", async (req, res) => {
+    res.json(await runAuditSkill(String(req.body?.skillId ?? ""), req.body?.answers ?? {}));
   });
   app.post("/api/agentkit/simulate", async (req, res) => {
     res.json(await simulateFullAuditExecution(typeof req.body?.findingId === "string" ? req.body.findingId : undefined));
@@ -90,13 +90,13 @@ async function startServer() {
     }));
   });
   app.get("/api/agentkit/activity", async (req, res) => res.json({ agents: await getAgentActivity(typeof req.query.agentId === "string" ? req.query.agentId : undefined) }));
-  app.get("/api/agentkit/manifest.json", (_req, res) => res.json(getAgentKitManifest()));
+  app.get("/api/agentkit/manifest.json", async (_req, res) => res.json(await getAgentKitManifest()));
   app.get("/api/graph/export", async (req, res) => res.json(await exportBitemporalGraph(typeof req.query.findingId === "string" ? req.query.findingId : undefined)));
   app.post("/api/evidence/intake", async (req, res) => res.json(await registerEvidence(req.body ?? {})));
   app.get("/api/reports/draft", async (req, res) => res.json(await getReportDraft(typeof req.query.findingId === "string" ? req.query.findingId : undefined)));
-  app.get("/api/regulatory/pack", (_req, res) => res.json(part21RegulatoryPack));
-  app.get("/api/regulatory/trace", (req, res) => res.json(traverseRegulatoryTree(typeof req.query.findingId === "string" ? req.query.findingId : undefined)));
-  app.get("/api/regulatory/impact", (req, res) => res.json(assessRemediationImpact(typeof req.query.findingId === "string" ? req.query.findingId : undefined)));
+  app.get("/api/regulatory/pack", async (_req, res) => res.json(await getControlledRegulatoryPack()));
+  app.get("/api/regulatory/trace", async (req, res) => res.json(await traverseControlledRegulatoryTree(typeof req.query.findingId === "string" ? req.query.findingId : undefined)));
+  app.get("/api/regulatory/impact", async (req, res) => res.json(await assessControlledRemediationImpact(typeof req.query.findingId === "string" ? req.query.findingId : undefined)));
   app.get("/api/ai/status", (_req, res) => res.json(getAiStatus()));
   app.get("/api/graph/store/status", async (_req, res) => res.json(await getGraphStoreStatus()));
   app.get("/api/graph/ontology-validation", async (_req, res) => res.json(await validateGraphOntology()));
@@ -124,8 +124,8 @@ async function startServer() {
   app.get("/api/governance/board", (_req, res) => res.json(getGovernanceBoard()));
   app.post("/api/governance/move", (req, res) => res.json(moveGovernanceItem(String(req.body?.id ?? ""), req.body?.target, String(req.body?.actor ?? "Assurance user"))));
   app.post("/api/governance/decide", (req, res) => res.json(decideGovernanceItem(String(req.body?.id ?? ""), req.body?.action, String(req.body?.note ?? ""), req.body?.deferUntil, String(req.body?.actor ?? "Assurance user"))));
-  app.get("/api/agents/registry", (_req, res) => res.json(getAgentRegistry()));
-  app.post("/api/agents/control", (req, res) => res.json(controlAgent(String(req.body?.agentId ?? ""), req.body?.action, String(req.body?.reason ?? ""))));
+  app.get("/api/agents/registry", async (_req, res) => res.json(await getAgentRegistry()));
+  app.post("/api/agents/control", async (req, res) => res.json(await controlAgent(String(req.body?.agentId ?? ""), req.body?.action, String(req.body?.reason ?? ""))));
   app.get("/api/policy/part21", async (_req, res) => res.json(await getControlledPolicyPack()));
   app.get("/api/policy/graph", async (_req, res) => res.json(await buildControlledPolicyGraph()));
   app.get("/api/policy/coverage", async (req, res) => res.json(await getControlledPolicyCoverage(String(req.query.auditId ?? ""))));
