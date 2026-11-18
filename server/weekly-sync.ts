@@ -1,4 +1,4 @@
-import { getPolicyCoverage } from "../shared/policy";
+import { getControlledPolicyCoverage } from "./policy-runtime";
 import { syncLocalWorkbooks } from "./xlsx-adapter";
 import { buildAuditReadinessReport } from "./agentkit";
 import { getReportDraft } from "./evidence";
@@ -14,12 +14,12 @@ const connectorRegistry = [
 ];
 
 export async function runWeeklySourceSync(actor = "Weekly Part 21 scheduler") {
-  const workbookSync = syncLocalWorkbooks(actor);
+  const workbookSync = await syncLocalWorkbooks(actor);
   const audits = await listAudits();
   const auditId = String((audits as any[])[0]?.id ?? "");
   if (!auditId) throw new Error("No database audit is available for weekly synchronization.");
   const readiness = await buildAuditReadinessReport(auditId);
-  const policyCoverage = getPolicyCoverage(auditId);
+  const policyCoverage = await getControlledPolicyCoverage(auditId);
   const report = {
     runId: `SYNC-${new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14)}`,
     startedAt: new Date().toISOString(),

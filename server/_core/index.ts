@@ -16,7 +16,7 @@ import { decideGovernanceItem, getGovernanceBoard, moveGovernanceItem } from "..
 import { controlAgent, getAgentRegistry } from "../agent-runtime";
 import { getVendoredEccLibrary } from "../ecc-library";
 import { renderEmbeddedEccDashboard } from "../ecc-dashboard";
-import { buildPolicyGraph, compileDocumentToPolicy, evaluatePart21Policy, getPolicyCoverage, part21PolicyPack } from "../../shared/policy";
+import { buildControlledPolicyGraph, compileControlledDocumentToPolicy, evaluateControlledPolicy, getControlledPolicyCoverage, getControlledPolicyPack } from "../policy-runtime";
 import { approveWorkbookImport, compareSnapshots, getExcelAdapterStatus, importWorkbookPayload, listPendingWorkbookApprovals, listSampleWorkbooks, readWorkbookSample } from "../xlsx-adapter";
 import { handleMcpJsonRpc } from "../mcp-protocol";
 import { getEventStoreStatus, listAssuranceEvents } from "../event-store";
@@ -24,6 +24,7 @@ import { runWeeklySourceSync } from "../weekly-sync";
 import { generateSyntheticPart21Decision, getDocumentControlStatus, listControlledDocuments, notarizeDocumentWithHederaDemo, registerControlledDocument, reviewDocumentCybersecurity } from "../document-control";
 import { getGroundedGraphContext, getGraphStoreStatus, validateGraphOntology } from "../graph-store";
 import { getDomainPortfolio, getDomainStoreStatus, listAudits } from "../domain-store";
+import { getConfigurationStoreStatus, getControlledConfiguration, listControlledConfigurations } from "../config-store";
 import { createContext } from "./context";
 import { serveStatic, setupVite } from "./vite";
 
@@ -37,6 +38,9 @@ async function startServer() {
   app.get("/api/domain/status", async (_req, res) => res.json(await getDomainStoreStatus()));
   app.get("/api/domain/audits", async (_req, res) => res.json({ source: "mysql-database", audits: await listAudits() }));
   app.get("/api/domain/portfolio", async (req, res) => res.json(await getDomainPortfolio(typeof req.query.auditId === "string" ? req.query.auditId : "")));
+  app.get("/api/configuration/status", async (_req, res) => res.json(await getConfigurationStoreStatus()));
+  app.get("/api/configuration/catalog", async (req, res) => res.json({ source: "mysql-database", configurations: await listControlledConfigurations(typeof req.query.kind === "string" ? req.query.kind as any : undefined) }));
+  app.get("/api/configuration/:kind/:configId", async (req, res) => res.json(await getControlledConfiguration(req.params.kind as any, req.params.configId, typeof req.query.version === "string" ? req.query.version : undefined)));
   app.get("/api/platform/config.js", (_req, res) => {
     res.set("Cache-Control", "no-store").type("application/javascript").send(publicPlatformScript());
   });
@@ -122,11 +126,11 @@ async function startServer() {
   app.post("/api/governance/decide", (req, res) => res.json(decideGovernanceItem(String(req.body?.id ?? ""), req.body?.action, String(req.body?.note ?? ""), req.body?.deferUntil, String(req.body?.actor ?? "Assurance user"))));
   app.get("/api/agents/registry", (_req, res) => res.json(getAgentRegistry()));
   app.post("/api/agents/control", (req, res) => res.json(controlAgent(String(req.body?.agentId ?? ""), req.body?.action, String(req.body?.reason ?? ""))));
-  app.get("/api/policy/part21", (_req, res) => res.json(part21PolicyPack));
-  app.get("/api/policy/graph", (_req, res) => res.json(buildPolicyGraph()));
-  app.get("/api/policy/coverage", (req, res) => res.json(getPolicyCoverage(String(req.query.auditId ?? ""))));
-  app.post("/api/policy/evaluate", (req, res) => res.json(evaluatePart21Policy(String(req.body?.findingId ?? ""), String(req.body?.asOf ?? new Date().toISOString().slice(0, 10)))));
-  app.post("/api/policy/compile", (req, res) => res.json(compileDocumentToPolicy(String(req.body?.documentId ?? "10-cfr-part-21"))));
+  app.get("/api/policy/part21", async (_req, res) => res.json(await getControlledPolicyPack()));
+  app.get("/api/policy/graph", async (_req, res) => res.json(await buildControlledPolicyGraph()));
+  app.get("/api/policy/coverage", async (req, res) => res.json(await getControlledPolicyCoverage(String(req.query.auditId ?? ""))));
+  app.post("/api/policy/evaluate", async (req, res) => res.json(await evaluateControlledPolicy(String(req.body?.findingId ?? ""), String(req.body?.asOf ?? new Date().toISOString().slice(0, 10)))));
+  app.post("/api/policy/compile", async (req, res) => res.json(await compileControlledDocumentToPolicy(String(req.body?.documentId ?? "10-cfr-part-21"))));
   app.get("/api/ontology/storage", async (_req, res) => {
     res.json(await ontologyStorageStatus());
   });

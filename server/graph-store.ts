@@ -1,5 +1,5 @@
 import { createPool, Pool } from "mysql2/promise";
-import { part21Ontology } from "../shared/ontology";
+import { getControlledConfiguration } from "./config-store";
 
 let pool: Pool | null = null;
 let initialized = false;
@@ -39,6 +39,7 @@ export async function getGraphStoreStatus() {
 
 export async function getGroundedGraphContext(findingId?: string) {
   const status = await ensureGraphStore();
+  const ontology = (await getControlledConfiguration<any>("ontology", "part21-assurance-ontology")).payload;
   const db = getPool();
   await ensureGraphStore();
   const [nodes] = await db.query<any[]>(`SELECT id, node_type AS type, label, subtitle, status, payload FROM part21_graph_nodes ORDER BY id`);
@@ -49,19 +50,20 @@ export async function getGroundedGraphContext(findingId?: string) {
   if (!resolvedFindingId) throw new Error("No persisted finding node is available for grounded analysis.");
   const hydratedEdges = edges.map((edge) => ({ ...edge, ...parseJson(edge.payload) }));
   const temporalEvents = events.map((event) => ({ ...event, payload: parseJson(event.payload) }));
-  return { ...status, findingId: resolvedFindingId, schema: graphSchema, ontologyVersion: part21Ontology.version, nodes: hydratedNodes, edges: hydratedEdges, temporalEvents, sourceIds: hydratedNodes.map((node) => node.id), traversalProof: { queryFindingId: resolvedFindingId, visitedNodeIds: hydratedNodes.map((node) => node.id), traversedEdgeIds: hydratedEdges.map((edge) => edge.id), temporalEventIds: temporalEvents.map((event) => event.entityId), source: "mysql-database" } };
+  return { ...status, findingId: resolvedFindingId, schema: graphSchema, ontologyVersion: ontology.version, nodes: hydratedNodes, edges: hydratedEdges, temporalEvents, sourceIds: hydratedNodes.map((node) => node.id), traversalProof: { queryFindingId: resolvedFindingId, visitedNodeIds: hydratedNodes.map((node) => node.id), traversedEdgeIds: hydratedEdges.map((edge) => edge.id), temporalEventIds: temporalEvents.map((event) => event.entityId), source: "mysql-database" } };
 }
 
 export async function validateGraphOntology() {
   await ensureGraphStore();
+  const ontology = (await getControlledConfiguration<any>("ontology", "part21-assurance-ontology")).payload;
   const db = getPool();
-  const classes = new Set(part21Ontology.classes.map((item) => item.id.toLowerCase()));
-  const relations = new Set(part21Ontology.relations.map((item) => item.id));
+  const classes = new Set(ontology.classes.map((item: any) => item.id.toLowerCase()));
+  const relations = new Set(ontology.relations.map((item: any) => item.id));
   const [nodes] = await db.query<any[]>("SELECT id, node_type AS nodeType FROM part21_graph_nodes");
   const [edges] = await db.query<any[]>("SELECT id, relation FROM part21_graph_edges");
   const invalidNodes = nodes.filter((node) => !classes.has(String(node.nodeType).toLowerCase()));
   const invalidEdges = edges.filter((edge) => !relations.has(String(edge.relation)));
-  return { source: "mysql-database", ontologyId: part21Ontology.id, ontologyVersion: part21Ontology.version, nodeCount: nodes.length, edgeCount: edges.length, invalidNodes, invalidEdges, consistent: invalidNodes.length === 0 && invalidEdges.length === 0 };
+  return { source: "mysql-database", ontologyId: ontology.id, ontologyVersion: ontology.version, nodeCount: nodes.length, edgeCount: edges.length, invalidNodes, invalidEdges, consistent: invalidNodes.length === 0 && invalidEdges.length === 0 };
 }
 
 function parseJson(value: unknown) {

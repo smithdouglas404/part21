@@ -1,7 +1,7 @@
 import { mcpTools } from "../shared/demo";
-import { part21Ontology } from "../shared/ontology";
+import { getControlledConfiguration } from "./config-store";
 import { assessRemediationImpact, part21RegulatoryPack, traverseRegulatoryTree } from "../shared/regulatory";
-import { compileDocumentToPolicy, evaluatePart21Policy, getPolicyCoverage, buildPolicyGraph } from "../shared/policy";
+import { buildControlledPolicyGraph, compileControlledDocumentToPolicy, evaluateControlledPolicy, getControlledPolicyCoverage } from "./policy-runtime";
 import { approveWorkbookImport, importLocalWorkbook, importWorkbookPayload, listLocalWorkbooks, listSampleWorkbooks, readWorkbookSample, compareSnapshots } from "./xlsx-adapter";
 import { runWeeklySourceSync } from "./weekly-sync";
 import { getGroundedGraphContext } from "./graph-store";
@@ -40,23 +40,24 @@ export async function callMcpTool(name: string, args: Record<string, unknown> = 
     case "ontology_resolve": {
       const sourceId = String(args.sourceId ?? "");
       const graph = await getGroundedGraphContext(String(args.findingId ?? ""));
+      const ontology = (await getControlledConfiguration<any>("ontology", "part21-assurance-ontology")).payload;
       const entity = graph.nodes.find((node: any) => node.id === sourceId || node.identifier === sourceId || node.sourceId === sourceId) ?? null;
-      return { sourceId, mapping: entity, context: entity ? { entity, ontologyVersion: part21Ontology.version } : null, ontologyVersion: part21Ontology.version, source: graph.source };
+      return { sourceId, mapping: entity, context: entity ? { entity, ontologyVersion: ontology.version } : null, ontologyVersion: ontology.version, source: graph.source };
     }
     case "temporal_findings_query":
-      return { findingId: args.findingId ?? "", temporalModel: part21Ontology.temporalModel, history: (await getGroundedGraphContext(String(args.findingId ?? ""))).temporalEvents, asOf: args.asOf ?? new Date().toISOString(), source: "mysql-database" };
+      return { findingId: args.findingId ?? "", temporalModel: (await getControlledConfiguration<any>("ontology", "part21-assurance-ontology")).payload.temporalModel, history: (await getGroundedGraphContext(String(args.findingId ?? ""))).temporalEvents, asOf: args.asOf ?? new Date().toISOString(), source: "mysql-database" };
     case "traverse_regulatory_tree":
       return traverseRegulatoryTree(String(args.findingId ?? ""));
     case "assess_remediation_impact":
       return assessRemediationImpact(String(args.findingId ?? ""));
     case "policy_evaluate":
-      return evaluatePart21Policy(String(args.findingId ?? ""), String(args.asOf ?? new Date().toISOString().slice(0, 10)));
+      return evaluateControlledPolicy(String(args.findingId ?? ""), String(args.asOf ?? new Date().toISOString().slice(0, 10)));
     case "policy_coverage":
-      return getPolicyCoverage(String(args.auditId ?? ""));
+      return getControlledPolicyCoverage(String(args.auditId ?? ""));
     case "policy_graph":
-      return buildPolicyGraph();
+      return buildControlledPolicyGraph();
     case "policy_compile":
-      return compileDocumentToPolicy(String(args.documentId ?? "10-cfr-part-21"));
+      return compileControlledDocumentToPolicy(String(args.documentId ?? "10-cfr-part-21"));
     case "recommend_remediation": {
       const impact = assessRemediationImpact(String(args.findingId ?? ""));
       return { ...impact, recommendationBasis: "Part 21 source pack + client-approved interpretation overlay required", sourceLinks: part21RegulatoryPack.sources, recommendations: impact.remediation.map((step, index) => ({ priority: index + 1, action: step, evidenceToClose: "Attach source record and accountable approval", humanGate: "Compliance / quality approval required" })) };

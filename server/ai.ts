@@ -1,10 +1,11 @@
 import { regulatoryTraceForFinding } from "../shared/regulatory";
 
-import { auditSkills } from "../shared/skills";
+import type { AuditSkill } from "../shared/skills";
 import { invokeLLM } from "./_core/llm";
 import { getGroundedGraphContext } from "./graph-store";
 import { getDomainPortfolio } from "./domain-store";
 import { appendAssuranceEvent } from "./event-store";
+import { listControlledConfigurationPayloads } from "./config-store";
 
 const sandboxEnvironmentProvider: "openai" | "anthropic" | null = process.env.OPENAI_API_KEY ? "openai" : process.env.ANTHROPIC_API_KEY ? "anthropic" : null;
 let configuredProvider: "openai" | "anthropic" | null = null;
@@ -25,6 +26,8 @@ export async function answerGroundedQuestion(question: string, auditId?: string,
   const normalized = question.toLowerCase();
   const portfolio = await getDomainPortfolio(auditId);
   const activeAudit = portfolio.audit as any;
+  const configuredSkills = (await listControlledConfigurationPayloads<AuditSkill>("skill")).map((row) => row.payload).filter((skill) => skill && typeof skill === "object" && "id" in skill && "route" in skill) as AuditSkill[];
+  if (!configuredSkills.length) throw new Error("No active skills are available in the controlled configuration repository.");
   const context = await getGroundedGraphContext(findingId ?? "");
   const graphFinding = context.nodes.find((node: any) => node.type === "finding" || node.nodeType === "finding");
   const finding = (portfolio.findings as any[]).find((item) => !findingId || item.id === findingId) ?? (portfolio.findings as any[])[0] ?? (graphFinding ? { id: graphFinding.id, title: graphFinding.label, severity: graphFinding.status, owner: "Database graph accountability record" } : null);
@@ -41,7 +44,7 @@ export async function answerGroundedQuestion(question: string, auditId?: string,
   else if (normalized.includes("requirement") || normalized.includes("part 21") || normalized.includes("regulation")) { appliedSkill = "frame-scope"; followUpQuestions = ["Which requirement family should I apply first: 21.21, 21.51, or 21.61?", "What client-approved procedure controls the interpretation?", "Should I load the scope framing skill?"]; answer = `The current finding traverses ${regulatoryTrace.path.slice(2).join(" → ")}. The system treats §21.21 evaluation, §21.51 records, and §21.61 failure-to-notify as candidate regulatory bases; a client-approved interpretation and human reportability decision are still required.`; }
   else if (normalized.includes("risk") || normalized.includes("impact")) { appliedSkill = "evidence-intake"; followUpQuestions = ["Which source systems should be queried next?", "What effective-date window should the evidence cover?", "Should I open the evidence intake skill?"]; answer = `Current modeled risk is ${regulatoryTrace.risk}. If the evidence chain remains unresolved, the organization may be unable to demonstrate traceability and may miss a timely evaluation or notification decision.`; }
   else if (normalized.includes("who") || normalized.includes("involved")) { appliedSkill = "frame-scope"; followUpQuestions = ["Which accountable role should own the next action?", "Which delegated roles must acknowledge the audit?", "Should I open the scope framing skill?"]; answer = `The database graph context for ${activeAudit?.id ?? "the active audit"} includes ${context.nodes.filter((node: any) => node.type === "person").map((person: any) => person.label).join(", ") || "no person nodes"}. People and role links must remain tied to the audit decision ledger.`; }
-  const skill = auditSkills.find((candidate) => candidate.id === appliedSkill) ?? auditSkills[0];
+  const skill = configuredSkills.find((candidate) => candidate.id === appliedSkill) ?? configuredSkills[0];
   return { question, answer, appliedSkill, activeAuditId: activeAudit?.id, findingId: finding.id, skillInvocation: { skillId: skill.id, name: skill.name, route: skill.route, contract: (skill as any).skillContract, humanGate: (skill as any).humanGate, invokedAt: new Date().toISOString(), invocationMode: "database-grounded router · provider not invoked" }, followUpQuestions, grounding: { findingId: finding.id, graphEntities: groundedContext.nodes.length, temporalEvents: history.length, regulatoryPath: regulatoryTrace.path, sourceIds: groundedContext.sourceIds }, traversalProof: groundedContext.traversalProof, provider: configuredProvider ? `${configuredProvider} configured · database-grounded router · LLM not invoked` : "database-grounded router · no LLM invoked", humanReviewRequired: true };
 }
 
