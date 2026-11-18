@@ -6,6 +6,7 @@ COPY patches ./patches
 RUN CI=1 pnpm install --frozen-lockfile
 COPY . .
 RUN pnpm build && pnpm build:temporal
+RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certificates && rm -rf /var/lib/apt/lists/*
 RUN curl -sL https://temporal.download/cli.sh | bash && cp /root/.temporalio/bin/temporal /usr/local/bin/temporal && chmod +x /usr/local/bin/temporal
 ENV NODE_ENV=production
 ENV PORT=3000
