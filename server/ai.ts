@@ -4,6 +4,7 @@ import { graphNodes } from "../shared/demo";
 import { applicationSkills } from "../shared/ecc";
 import { auditSkills } from "../shared/skills";
 import { invokeLLM } from "./_core/llm";
+import { getGroundedGraphContext } from "./graph-store";
 
 const sandboxEnvironmentProvider: "openai" | "anthropic" | null = process.env.OPENAI_API_KEY ? "openai" : process.env.ANTHROPIC_API_KEY ? "anthropic" : null;
 let configuredProvider: "openai" | "anthropic" | null = null;
@@ -38,14 +39,18 @@ export function answerGroundedQuestion(question: string) {
 
 export async function answerLiveGroundedQuestion(question: string) {
   const grounded = answerGroundedQuestion(question);
+  const graphContext = await getGroundedGraphContext("FIND-2026-04");
   const contextPacket = {
     activeAudit: "AUD-026",
     pertNode: "guided audit phase selected by the employee",
     appliedSkill: grounded.skillInvocation,
-    graphEntities: grounded.grounding.graphEntities,
-    temporalEvents: grounded.grounding.temporalEvents,
+    graphSource: graphContext.source,
+    graphEntities: graphContext.nodes.length,
+    graphEdges: graphContext.edges.length,
+    temporalEvents: graphContext.temporalEvents.length,
     regulatoryPath: grounded.grounding.regulatoryPath,
-    sourceIds: grounded.grounding.sourceIds,
+    sourceIds: graphContext.sourceIds,
+    graphSnapshot: { nodes: graphContext.nodes, edges: graphContext.edges, temporalEvents: graphContext.temporalEvents },
     deterministicGroundingHint: grounded.answer,
     humanReviewRequired: true
   };
