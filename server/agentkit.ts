@@ -139,8 +139,35 @@ export async function exportBitemporalGraph(findingId?: string) {
 }
 
 export async function getAgentActivity(agentId?: string) {
-  const simulation = await simulateFullAuditExecution();
-  return simulation.steps.filter((step) => !agentId || step.agent === agentId).map((step) => ({ phase: step.phase, phaseLabel: step.phaseLabel, agent: step.agent, route: step.route, humanGate: step.humanGate, toolCalls: step.toolCalls }));
+  const [simulation, configuredSkills] = await Promise.all([
+    simulateFullAuditExecution(),
+    listControlledConfigurationPayloads<AuditSkill>("skill"),
+  ]);
+  const skills = configuredSkills.map((item) => item.payload);
+  return simulation.steps
+    .filter((step) => !agentId || step.agent === agentId)
+    .map((step) => {
+      const skill = skills.find((candidate) => candidate.phase === step.phaseId);
+      return {
+        phase: step.phase,
+        phaseLabel: step.phaseLabel,
+        agent: step.agent,
+        route: step.route,
+        humanGate: step.humanGate,
+        toolCalls: step.toolCalls,
+        skill: skill ? {
+          id: skill.id,
+          name: skill.name,
+          purpose: skill.purpose,
+          phase: skill.phase,
+          route: skill.route,
+          contract: (skill as any).skillContract,
+          humanGate: skill.humanGate,
+          questionCount: skill.questions.length,
+          source: "mysql-controlled-configuration",
+        } : null,
+      };
+    });
 }
 
 
