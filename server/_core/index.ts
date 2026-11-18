@@ -32,6 +32,12 @@ import { getGroundedGraphContext, getGraphStoreStatus, validateGraphOntology } f
 import { getDomainPortfolio, getDomainStoreStatus, listAudits } from "../domain-store";
 import { getConfigurationStoreStatus, getControlledConfiguration, listControlledConfigurations } from "../config-store";
 import { getMergedStudioOpenApi, getStudioGatewayStatus, studioProxyMiddleware } from "../studio-gateway";
+import { resolveRequestPrincipal, AssuranceAccessError } from "../access-control";
+import { createPart21CaseRecord, getPart21Case, listPart21Cases, part21ProcessReference, recordPart21Fact } from "../part21-case";
+import { listDomainRecords } from "../domain-store";
+import { verifyProcessCitations, verifyProcessModelCoverage } from "../part21-citation-verify";
+import { listSourceSnapshots, getRegulatorySnapshot } from "../regulatory-source";
+
 import { createContext } from "./context";
 import { serveStatic, setupVite } from "./vite";
 
@@ -187,7 +193,7 @@ async function startServer() {
   app.get("/api/ai/status", (_req, res) => res.json(getAiStatus()));
   app.get("/api/graph/store/status", async (_req, res) => res.json(await getGraphStoreStatus()));
   app.get("/api/graph/ontology-validation", async (_req, res) => res.json(await validateGraphOntology()));
-  app.get("/api/graph/context", async (req, res) => { try { res.json(await getGroundedGraphContext(typeof req.query.findingId === "string" ? req.query.findingId : "")); } catch (error) { res.status(409).json({ ok: false, error: error instanceof Error ? error.message : "Graph context unavailable", databaseGroundingRequired: true }); } });
+  app.get("/api/graph/context", async (req, res) => { try { res.json(await getGroundedGraphContext(typeof req.query.findingId === "string" ? req.query.findingId : "", typeof req.query.auditId === "string" ? req.query.auditId : "")); } catch (error) { res.status(409).json({ ok: false, error: error instanceof Error ? error.message : "Graph context unavailable", databaseGroundingRequired: true }); } });
   app.post("/api/ai/ask", async (req, res) => {
     const question = String(req.body?.question ?? "");
     const audits = await listAudits();
@@ -238,6 +244,87 @@ async function startServer() {
     const report = await buildAuditReadinessReport(typeof req.query.auditId === "string" ? req.query.auditId : "");
     res.setHeader("Content-Disposition", `attachment; filename=part21-${report.audit.id.toLowerCase()}-readiness.csv`);
     res.type("text/csv").send(reportToCsv(report));
+  });
+
+  async function withPrincipal(req: Request, res: Response, work: (getPrincipal: () => Promise<Awaited<ReturnType<typeof resolveRequestPrincipal>>>) => Promise<unknown>) {
+    try {
+      const getPrincipal = () => resolveRequestPrincipal(req);
+      res.json(await work(getPrincipal));
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Part 21 operation failed";
+      const status = error instanceof AssuranceAccessError ? error.status : /not found|does not exist|unknown/i.test(message) ? 404 : /required|invalid|must|cannot|closed|rewritten|already exists|outside/i.test(message) ? 409 : 503;
+      res.status(status).json({ ok: false, error: message, databaseGroundingRequired: true });
+    }
+  }
+  async function principalOrReadOnly(req: Request, auditId: string) {
+    try { return await resolveRequestPrincipal(req); }
+    catch {
+      // The published demonstration allows read-only inspection without a session; every write remains authenticated.
+      return { id: "read-only-visitor", actor: "Read-only visitor (no session)", roleIds: [], isAdmin: false, qualified: false, access: "look_only" as const, auditIds: auditId ? [auditId] : [], auditWriteIds: [], qualifiedAuditIds: [] } as any;
+    }
+  }
+  const calendarFrom = (req: Request) => ({
+    timezone: typeof req.query.timezone === "string" ? req.query.timezone : undefined,
+    holidays: typeof req.query.holidays === "string" ? req.query.holidays.split(",").map(value => value.trim()).filter(Boolean) : undefined,
+    triggerDay: req.query.triggerDay === "include" ? "include" as const : undefined,
+  });
+  app.get("/api/session", async (req, res) => {
+    try {
+      const principal = await resolveRequestPrincipal(req);
+      res.json({ authenticated: true, principal, auditIds: principal.auditIds ?? [] });
+    } catch {
+      try {
+        const audits = await listAudits();
+        const auditIds = (audits as any[]).map(audit => String(audit.id));
+        res.json({
+          authenticated: false,
+          demoMode: "read-only-visitor",
+          principal: { id: "read-only-visitor", actor: "Read-only visitor", roleIds: [], isAdmin: false, qualified: false, access: "look_only", auditIds, auditWriteIds: [], qualifiedAuditIds: [] },
+          auditIds,
+          notice: "No application session. Inspection is read-only; every write requires a signed-in identity with an audit grant.",
+        });
+      } catch (error) {
+        res.status(503).json({ ok: false, error: error instanceof Error ? error.message : "Session unavailable" });
+      }
+    }
+  });
+  app.get("/api/nuclear/status", async (req, res) => {
+    try {
+      const auditId = typeof req.query.auditId === "string" ? req.query.auditId : "";
+      const part21 = await listSourceSnapshots("ecfr-part-21");
+      const snapshot = part21[0] ?? null;
+      const verification = snapshot ? verifyProcessCitations(await getRegulatorySnapshot(snapshot.id)) : null;
+      const cases = auditId ? await listDomainRecords<any>("part21_case", auditId).catch(() => []) : [];
+      res.json({
+        auditId: auditId || null,
+        source: "mysql-database",
+        regulatorySource: snapshot ? { ingested: true, snapshotId: snapshot.id, sourceAsOf: snapshot.sourceAsOf, latestAmendedOn: snapshot.latestAmendedOn, providerUpToDateAsOf: snapshot.providerUpToDateAsOf, provisions: snapshot.provisions.length, citationsVerified: verification?.verified ?? 0, citationsMismatched: verification?.mismatched ?? 0 } : { ingested: false, note: "No official source snapshot has been ingested; citations must not be presented as current law." },
+        temporal: { configured: Boolean(process.env.TEMPORAL_ADDRESS && process.env.TEMPORAL_NAMESPACE && process.env.TEMPORAL_TASK_QUEUE), running: false, note: "Durable workflows require a Temporal service and worker. Not configured in this deployment, so no production clock supervision is running." },
+        evidenceVault: { originalBytes: "mysql", objectLock: process.env.S3_OBJECT_LOCK_BUCKET ? "configured" : "not-configured", immudb: process.env.IMMUDB_ADDRESS ? "configured" : "not-configured", note: "A SHA-256 hash is not WORM protection. External Object Lock and immudb verification are not active." },
+        part21Cases: { auditScoped: cases.length, clockModel: "event-triggered branches computed from recorded facts", calendarApproval: "not-approved-for-reliance" },
+        humanReviewRequired: true,
+      });
+    } catch (error) { res.status(503).json({ ok: false, error: error instanceof Error ? error.message : "Nuclear status unavailable" }); }
+  });
+  app.get("/api/part21/process", async (req, res) => res.json(await part21ProcessReference(calendarFrom(req))));
+  app.get("/api/part21/cases", async (req, res) => withPrincipal(req, res, async () => { const auditId = String(req.query.auditId ?? ""); const principal = await principalOrReadOnly(req, auditId); return listPart21Cases(auditId, principal); }));
+  app.get("/api/part21/cases/:caseId", async (req, res) => withPrincipal(req, res, async () => { const auditId = String(req.query.auditId ?? ""); const principal = await principalOrReadOnly(req, auditId); return getPart21Case(auditId, req.params.caseId, principal, calendarFrom(req)); }));
+  app.post("/api/part21/cases", async (req, res) => withPrincipal(req, res, async getPrincipal => createPart21CaseRecord(req.body ?? {}, await getPrincipal())));
+  app.post("/api/part21/cases/:caseId/facts", async (req, res) => withPrincipal(req, res, async getPrincipal => recordPart21Fact({ ...(req.body ?? {}), auditId: String(req.body?.auditId ?? req.query.auditId ?? ""), caseId: req.params.caseId }, await getPrincipal())));
+  app.get("/api/regulatory/snapshots", async (_req, res) => {
+    try {
+      const part21 = await listSourceSnapshots("ecfr-part-21");
+      const appendixB = await listSourceSnapshots("ecfr-part-50-appendix-b");
+      res.json({ source: "ecfr-rest-api", snapshots: [...part21, ...appendixB].map(snapshot => ({ id: snapshot.id, sourceId: snapshot.sourceId, regulationSet: snapshot.regulationSet, sourceAsOf: snapshot.sourceAsOf, latestAmendedOn: snapshot.latestAmendedOn, providerUpToDateAsOf: snapshot.providerUpToDateAsOf, retrievedAt: snapshot.retrievedAt, provisions: snapshot.provisions.length, originals: snapshot.originals.length, legalStatus: snapshot.legalStatus })) });
+    } catch (error) { res.status(503).json({ ok: false, error: error instanceof Error ? error.message : "Regulatory snapshots unavailable" }); }
+  });
+  app.get("/api/regulatory/verification", async (req, res) => {
+    try {
+      const requested = typeof req.query.snapshotId === "string" ? req.query.snapshotId : "";
+      const snapshot = requested ? await getRegulatorySnapshot(requested) : (await listSourceSnapshots("ecfr-part-21"))[0];
+      if (!snapshot) return res.status(404).json({ ok: false, error: "No ingested Part 21 snapshot is available. Ingest the official eCFR source before displaying citations as current." });
+      res.json({ ...verifyProcessCitations(snapshot), modelCoverage: verifyProcessModelCoverage(snapshot) });
+    } catch (error) { res.status(503).json({ ok: false, error: error instanceof Error ? error.message : "Citation verification unavailable" }); }
   });
   registerOAuthRoutes(app);
   // tRPC API

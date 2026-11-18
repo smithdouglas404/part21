@@ -1,0 +1,30 @@
+# Worker-only deployment candidate. No Temporal server/prod DB is installed by this file.
+# Operator supplies a reviewed service endpoint, credentials and DATABASE_URL in a private env file.
+services:
+  part21-temporal-worker:
+    image: ${PART21_TEMPORAL_WORKER_IMAGE:?operator-built worker image is required}
+    command: ["node", "dist/temporal/worker-entry.js"]
+    restart: unless-stopped
+    init: true
+    stop_grace_period: 60s
+    env_file:
+      - ${PART21_TEMPORAL_ENV_FILE:?private worker environment file is required}
+    environment:
+      NODE_ENV: production
+      TEMPORAL_WORKFLOW_BUNDLE_PATH: /app/dist/temporal/workflow-bundle.js
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:'+process.env.TEMPORAL_HEALTH_PORT+'/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 45s
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"

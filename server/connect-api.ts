@@ -3,16 +3,17 @@ import type { Request } from "express";
 import { appendAssuranceEvent } from "./event-store";
 import { listDomainRecords, upsertDomainRecord } from "./domain-store";
 import { callMcpTool } from "./mcp";
+import { assertAuditPermission, resolveRequestPrincipal } from "./access-control";
 
 type ConnectToken = { id: string; tokenHash: string; label: string; actor: string; role: string; auditId?: string; access: "look_only" | "make_changes"; createdAt: string; revokedAt?: string };
-const writeTools = new Set(["field_kanban_create", "field_kanban_move", "field_kanban_attach", "excel_import_local_workbook", "excel_import_workbook", "excel_approve_import"]);
+export const writeTools = new Set(["field_kanban_create", "field_kanban_move", "field_kanban_attach", "field_kanban_communicate", "create_finding", "agent_intake", "run_audit_skill", "policy_compile", "excel_import_local_workbook", "excel_import_workbook", "excel_approve_import", "run_weekly_source_sync", "part21_case_create", "part21_case_event", "evidence_verify"]);
 
 function bearer(req: Request) { const value = String(req.headers.authorization ?? ""); return value.startsWith("Bearer ") ? value.slice(7).trim() : ""; }
 function hash(value: string) { return crypto.createHash("sha256").update(value).digest("hex"); }
 
 function configuredStudioBridgeToken(): ConnectToken | undefined {
   const raw = String(process.env.STUDIO_PART21_BEARER_TOKEN ?? "").trim();
-  if (!raw) return undefined;
+  if (!raw || !process.env.STUDIO_BRIDGE_ACTOR || !process.env.STUDIO_BRIDGE_ROLE) return undefined;
   return {
     id: "STUDIO-BRIDGE-TOKEN",
     tokenHash: hash(raw),
@@ -37,17 +38,22 @@ async function authenticateAgainstStudio(raw: string): Promise<ConnectToken | un
     });
     if (!response.ok) return undefined;
     const result = await response.json() as any;
-    const access = result?.access ?? result?.data?.access ?? result?.result?.access;
-    const actor = result?.actor ?? result?.data?.actor ?? result?.result?.actor;
-    const role = result?.role ?? result?.data?.role ?? result?.result?.role;
+    const data = result?.data ?? result?.result ?? result;
+    const accessValue = data?.access;
+    const access = typeof accessValue === "string" ? accessValue.toLowerCase().replaceAll(" ", "_") : String(accessValue?.mode ?? accessValue?.permission ?? "").toLowerCase();
+    const actorValue = data?.actor;
+    const actor = typeof actorValue === "string" ? actorValue : actorValue?.name ?? actorValue?.id;
+    const roleValue = data?.role;
+    const role = typeof roleValue === "string" ? roleValue : roleValue?.name ?? roleValue?.id;
+    if (!actor || !role || !["look_only", "make_changes", "look_and_make_changes"].includes(access)) return undefined;
     return {
       id: "STUDIO-LIVE-INTROSPECTION",
       tokenHash: hash(raw),
       label: "Live Socra bearer token",
-      actor: String(actor ?? process.env.STUDIO_BRIDGE_ACTOR ?? "Socra connector actor"),
-      role: String(role ?? process.env.STUDIO_BRIDGE_ROLE ?? "Socra connector role"),
+      actor: String(actor),
+      role: String(role),
       auditId: process.env.STUDIO_BRIDGE_AUDIT_ID ? String(process.env.STUDIO_BRIDGE_AUDIT_ID) : undefined,
-      access: access === "look_only" ? "look_only" : (process.env.STUDIO_BRIDGE_ACCESS === "look_only" ? "look_only" : "make_changes"),
+      access: access === "look_only" || process.env.STUDIO_BRIDGE_ACCESS === "look_only" ? "look_only" : "make_changes",
       createdAt: "live-socra-introspection",
     };
   } catch {
@@ -82,8 +88,9 @@ export async function callConnectedTool(req: Request, tool: string, args: Record
     const alias = args.audit_id ?? args.auditID ?? (typeof args.audit === "string" ? args.audit : undefined);
     if (typeof alias === "string" && alias.trim()) args.auditId = alias.trim();
   }
-  if (["field_kanban_list", "field_kanban_create", "field_kanban_attach", "check_audit_readiness", "audit_brief_agent", "agent_intake"].includes(tool) && !String(args.auditId ?? "").trim() && !auth.token.auditId) {
-    return { ok: false as const, status: 400, error: "auditId is required for this tool. Select an audit and resend the request with its database auditId, for example AUD-026." };
+  if (!args.auditId && auth.token.auditId) args.auditId = auth.token.auditId;
+  if (!["excel_list_workbooks", "excel_describe_workbook", "excel_read_range", "excel_compare_revision", "policy_graph"].includes(tool) && !String(args.auditId ?? "").trim()) {
+    return { ok: false as const, status: 400, error: "auditId is required for this tool. Select an audit and resend the request with its database auditId." };
   }
   if (tool === "field_kanban_create" && !String(args.description ?? "").trim() && !args.findingId && !args.productId && !args.sourceRecordId) {
     return { ok: false as const, status: 400, error: "A Kanban item needs actionable detail or an explicit findingId, productId, or sourceRecordId. Do not create an ungrounded title-only note." };
@@ -94,12 +101,14 @@ export async function callConnectedTool(req: Request, tool: string, args: Record
   }
   if (auth.token.access === "look_only" && writeTools.has(tool)) return { ok: false as const, status: 403, error: "This connector is look-only; a make-changes token is required." };
   if (auth.token.auditId && typeof args.auditId === "string" && args.auditId !== auth.token.auditId) return { ok: false as const, status: 404, error: "Audit is outside this connector's customer scope." };
-  if (auth.token.auditId && !args.auditId && ["field_kanban_create", "field_kanban_attach"].includes(tool)) args.auditId = auth.token.auditId;
-  if (writeTools.has(tool) && !confirm) {
+  const principal = await resolveRequestPrincipal(req);
+  if (args.auditId) assertAuditPermission(principal, String(args.auditId), writeTools.has(tool));
+  const continuingDialogue = tool === "agent_intake" && args.finalize !== true && Boolean(args.conversationId || args.itemId);
+  if (writeTools.has(tool) && !confirm && !continuingDialogue) {
     await appendAssuranceEvent({ type: "connect_confirmation_preview", actor: auth.token.actor, auditId: auth.token.auditId, entityId: tool, payload: { tool, args, clientName: req.headers["x-client-name"] ?? "unknown" } });
     return { ok: false as const, status: 202, needs_confirmation: true, preview: `This would call ${tool} as ${auth.token.actor} (${auth.token.role})${auth.token.auditId ? ` for audit ${auth.token.auditId}` : ""}. Send confirm=true only after the person approves.` };
   }
-  const result = await callMcpTool(tool, { ...args, actor: String(args.actor ?? auth.token.actor) });
+  const result = await callMcpTool(tool, { ...args, actor: principal.actor, createdBy: principal.actor, principal });
   await appendAssuranceEvent({ type: "connect_tool_call", actor: auth.token.actor, auditId: auth.token.auditId ?? (typeof args.auditId === "string" ? args.auditId : undefined), entityId: tool, payload: { tool, args, confirm, clientName: req.headers["x-client-name"] ?? "unknown", outcome: (result as any)?.error ? "error" : "ok" } });
   return { ok: true as const, data: result, actor: auth.token.actor, role: auth.token.role, tool };
 }

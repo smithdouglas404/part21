@@ -24,6 +24,7 @@ export interface AuditSkill {
   regulatoryRefs?: string[];
   domain?: "part21" | "appendix-b" | "nuclear-overlay";
   requiredEvidence?: string[];
+  definitionStatus?: "draft_candidate";
   clockPolicy?: { id: string; trigger: string; duration: string; deadlineBasis: "calendar_days" | "working_days" | "human_gate" }[];
 }
 
@@ -56,7 +57,7 @@ export const auditSkills: AuditSkill[] = [
     humanGate: "Audit lead confirms scope and accountable owner.",
     questions: [
       { id: "scope-object", prompt: "What product, facility, process, or change is in scope?", helper: "Name the object employees would put on the audit cover sheet.", input: "text", required: true, evidenceHint: "Create or link the scope anchor in the graph." },
-      { id: "scope-standard", prompt: "Which requirement families must this audit test?", helper: "Select the applicable Part 21-style controls and client procedures.", input: "choice", options: ["21.51 traceability", "21.61 nonconforming articles", "Supplier oversight", "Configuration control"], required: true, evidenceHint: "Bind the scope to control IDs." },
+      { id: "scope-standard", prompt: "Which requirement families must this audit test?", helper: "Separate Part 21 applicability/evaluation from the applicable Appendix B QA criteria; qualified interpretation is required.", input: "choice", options: ["10 CFR 21.21 evaluation and notification", "10 CFR 21.51 maintenance and inspection of records", "Appendix B VII/VIII supplier control and item identification", "Appendix B XV/XVI nonconformance and corrective action", "Client-approved configuration control"], required: true, evidenceHint: "Bind the scope to exact governed requirement IDs; no generic first-section mapping." },
       { id: "scope-risk", prompt: "What would make this scope higher risk than normal?", helper: "Consider safety classification, recent change, supplier exposure, or weak evidence.", input: "text", required: true, evidenceHint: "Store risk rationale as an audit context note." },
     ],
     completionSignal: "Scope anchor, control families, risk rationale, and accountable owner are present.",
@@ -136,5 +137,7 @@ export const agentKitAgents: AgentKitAgent[] = [
 ];
 
 export function getSkillForPhase(phase: AuditSkillPhase) {
-  return auditSkills.find((skill) => skill.phase === phase) ?? auditSkills[0];
+  const skill = auditSkills.find((candidate) => candidate.phase === phase);
+  if (!skill) throw new Error(`No skill definition exists for phase ${phase}.`);
+  return skill;
 }

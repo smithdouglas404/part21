@@ -3,7 +3,7 @@ import type { AuditSkill } from "./skills";
 /**
  * Draft nuclear domain contracts, not approved rules or operational records.
  * Stage explicitly in MySQL for qualified review; never auto-activate at startup.
- * Route identifiers below are proposed mappings, not independent deployed agents.
+ * Route identifiers map to executable tool handlers in server/agentkit.ts; these definitions remain unapproved candidates.
  * Clock metadata states obligations; a deployed deterministic workflow must implement it.
  */
 export const nuclearPart21Skills: AuditSkill[] = [
@@ -14,6 +14,7 @@ export const nuclearPart21Skills: AuditSkill[] = [
     purpose: "Establish whether the item, activity, entity, and governing license or approval fall within the Part 21 scope before asking for a reportability conclusion.",
     agent: "nuclear-applicability-screen",
     route: "agentkit.nuclear.part21_applicability",
+    definitionStatus: "draft_candidate",
     skillContract: "P21-NUCLEAR-APPLICABILITY-01",
     humanGate: "Qualified nuclear quality or legal reviewer confirms scope and any exclusion or exemption basis.",
     regulatoryRefs: ["10 CFR 21.1", "10 CFR 21.2", "10 CFR 21.3", "10 CFR 21.7"],
@@ -33,6 +34,7 @@ export const nuclearPart21Skills: AuditSkill[] = [
     purpose: "Capture the discovery event precisely and start the correct Part 21 evaluation and escalation clocks without silently converting a field note into a reportable defect.",
     agent: "nuclear-discovery-clock",
     route: "agentkit.nuclear.part21_discovery_clock",
+    definitionStatus: "draft_candidate",
     skillContract: "P21-NUCLEAR-CLOCK-02",
     humanGate: "Responsible quality role validates discovery date, clock trigger, and any interim-report decision.",
     regulatoryRefs: ["10 CFR 21.21(a)(1)", "10 CFR 21.21(a)(2)", "10 CFR 21.21(a)(3)"],
@@ -56,6 +58,7 @@ export const nuclearPart21Skills: AuditSkill[] = [
     purpose: "Separate a deviation, failure to comply, defect, condition adverse to quality, and reportable Part 21 condition using source-linked evidence.",
     agent: "nuclear-deviation-screener",
     route: "agentkit.nuclear.deviation_screening",
+    definitionStatus: "draft_candidate",
     skillContract: "P21-NUCLEAR-SCREEN-03",
     humanGate: "Qualified evaluator approves the screening classification and records the contrary-evidence search.",
     regulatoryRefs: ["10 CFR 21.3", "10 CFR 21.21(a)"],
@@ -75,6 +78,7 @@ export const nuclearPart21Skills: AuditSkill[] = [
     purpose: "Guide the technical evaluation of whether an uncorrected defect or failure to comply could create a substantial safety hazard, without issuing the final legal conclusion.",
     agent: "nuclear-ssh-evaluator",
     route: "agentkit.nuclear.substantial_safety_hazard",
+    definitionStatus: "draft_candidate",
     skillContract: "P21-NUCLEAR-SSH-04",
     humanGate: "Independent qualified technical reviewer accepts the evaluation basis and conclusion.",
     regulatoryRefs: ["10 CFR 21.3 definitions of defect and substantial safety hazard", "10 CFR 21.21(a)", "10 CFR 21.21(d)(4)"],
@@ -94,6 +98,7 @@ export const nuclearPart21Skills: AuditSkill[] = [
     purpose: "Prepare the human-gated escalation and notification package, including the 5-working-day responsible-officer path, 2-day initial notification, and 30-day written report path.",
     agent: "nuclear-notification-coordinator",
     route: "agentkit.nuclear.notification_package",
+    definitionStatus: "draft_candidate",
     skillContract: "P21-NUCLEAR-NOTIFY-05",
     humanGate: "Responsible officer or designated person approves notification, interim report, or documented non-notification disposition.",
     regulatoryRefs: ["10 CFR 21.21(a)(3)", "10 CFR 21.21(d)(3)", "10 CFR 21.21(d)(4)", "10 CFR 21.61"],
@@ -117,6 +122,7 @@ export const nuclearPart21Skills: AuditSkill[] = [
     purpose: "Track supplier discovery, purchaser notification, evaluation capability, transfer of responsibility, and response closure for basic components or associated services.",
     agent: "nuclear-supplier-coordinator",
     route: "agentkit.nuclear.supplier_evaluation_transfer",
+    definitionStatus: "draft_candidate",
     skillContract: "P21-NUCLEAR-SUPPLIER-06",
     humanGate: "Supplier quality and licensee quality approve the transfer, acceptance, or escalation path.",
     regulatoryRefs: ["10 CFR 21.21(b)", "10 CFR 21.31", "10 CFR 50 Appendix B Criterion VII"],
@@ -137,6 +143,7 @@ export const nuclearPart21Skills: AuditSkill[] = [
     purpose: "Trace a dedicated commercial item from critical characteristics and acceptance methods through receipt inspection, supplier controls, and safety-related use.",
     agent: "nuclear-cgd-tracer",
     route: "agentkit.nuclear.commercial_grade_dedication",
+    definitionStatus: "draft_candidate",
     skillContract: "P21-NUCLEAR-CGD-07",
     humanGate: "Qualified dedication engineer and quality organization accept the dedication package.",
     regulatoryRefs: ["10 CFR 21.21(c)", "10 CFR 50 Appendix B Criterion VII", "10 CFR 50 Appendix B Criterion VIII", "RG 1.164"],
@@ -156,6 +163,7 @@ export const nuclearPart21Skills: AuditSkill[] = [
     purpose: "Test design bases, design interfaces, procurement requirements, document revisions, and field changes that affect safety-related structures, systems, and components.",
     agent: "nuclear-design-control-tracer",
     route: "agentkit.nuclear.appendix_b_design_control",
+    definitionStatus: "draft_candidate",
     skillContract: "P21-NUCLEAR-DESIGN-08",
     humanGate: "Responsible design organization and independent verifier accept the interface and revision trace.",
     regulatoryRefs: ["10 CFR 50 Appendix B Criterion III", "10 CFR 50 Appendix B Criterion IV", "10 CFR 50 Appendix B Criterion VI"],
@@ -175,6 +183,7 @@ export const nuclearPart21Skills: AuditSkill[] = [
     purpose: "Connect nonconforming material, condition reports, corrective action, affected organizations, and Part 21 screening without treating every CAP item as reportable.",
     agent: "nuclear-cap-bridge",
     route: "agentkit.nuclear.nonconformance_cap_bridge",
+    definitionStatus: "draft_candidate",
     skillContract: "P21-NUCLEAR-CAP-09",
     humanGate: "CAP owner and Part 21 evaluator approve the screening linkage and corrective-action disposition.",
     regulatoryRefs: ["10 CFR 50 Appendix B Criterion XV", "10 CFR 50 Appendix B Criterion XVI", "10 CFR 21.21"],
@@ -194,6 +203,7 @@ export const nuclearPart21Skills: AuditSkill[] = [
     purpose: "Prepare retrievable objective-quality evidence and independent audit trails for Part 21 evaluations and Appendix B quality assurance program audits.",
     agent: "nuclear-records-auditor",
     route: "agentkit.nuclear.records_and_audits",
+    definitionStatus: "draft_candidate",
     skillContract: "P21-NUCLEAR-RECORDS-10",
     humanGate: "Quality records owner and lead auditor accept completeness, retrievability, and independence evidence.",
     regulatoryRefs: ["10 CFR 21.41", "10 CFR 21.51", "10 CFR 50 Appendix B Criterion XVII", "10 CFR 50 Appendix B Criterion XVIII"],
@@ -213,6 +223,7 @@ export const nuclearPart21Skills: AuditSkill[] = [
     purpose: "Verify that required Part 21 information, procedures, and responsible contacts are accessible to affected personnel and that posting evidence is current.",
     agent: "nuclear-posting-verifier",
     route: "agentkit.nuclear.postings_and_communications",
+    definitionStatus: "draft_candidate",
     skillContract: "P21-NUCLEAR-POSTINGS-11",
     humanGate: "Site quality or compliance owner confirms location coverage and current controlled content.",
     regulatoryRefs: ["10 CFR 21.5", "10 CFR 21.6", "10 CFR 50.7"],

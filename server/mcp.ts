@@ -26,7 +26,7 @@ export async function callMcpTool(name: string, args: Record<string, unknown> = 
     case "search_entities": {
       const query = String(args.query ?? "").toLowerCase();
       const types = Array.isArray(args.types) ? args.types.map(String) : undefined;
-      const context = await getGroundedGraphContext(String(args.findingId ?? ""));
+      const context = await getGroundedGraphContext(String(args.findingId ?? ""), String(args.auditId ?? ""));
       const nodes = context.nodes.filter((node: any) => {
         const matchesQuery = !query || [node.id, node.label, node.meta, node.description].join(" ").toLowerCase().includes(query);
         const matchesType = !types || types.includes(node.type);
@@ -36,13 +36,13 @@ export async function callMcpTool(name: string, args: Record<string, unknown> = 
     }
     case "ontology_resolve": {
       const sourceId = String(args.sourceId ?? "");
-      const graph = await getGroundedGraphContext(String(args.findingId ?? ""));
+      const graph = await getGroundedGraphContext(String(args.findingId ?? ""), String(args.auditId ?? ""));
       const ontology = (await getControlledConfiguration<any>("ontology", "part21-assurance-ontology")).payload;
       const entity = graph.nodes.find((node: any) => node.id === sourceId || node.identifier === sourceId || node.sourceId === sourceId) ?? null;
       return { sourceId, mapping: entity, context: entity ? { entity, ontologyVersion: ontology.version } : null, ontologyVersion: ontology.version, source: graph.source };
     }
     case "temporal_findings_query":
-      return { findingId: args.findingId ?? "", temporalModel: (await getControlledConfiguration<any>("ontology", "part21-assurance-ontology")).payload.temporalModel, history: (await getGroundedGraphContext(String(args.findingId ?? ""))).temporalEvents, asOf: args.asOf ?? new Date().toISOString(), source: "mysql-database" };
+      return { findingId: args.findingId ?? "", temporalModel: (await getControlledConfiguration<any>("ontology", "part21-assurance-ontology")).payload.temporalModel, history: (await getGroundedGraphContext(String(args.findingId ?? ""), String(args.auditId ?? ""))).temporalEvents, asOf: args.asOf ?? new Date().toISOString(), source: "mysql-database" };
     case "traverse_regulatory_tree":
       return traverseControlledRegulatoryTree(String(args.findingId ?? ""));
     case "assess_remediation_impact":
@@ -61,17 +61,17 @@ export async function callMcpTool(name: string, args: Record<string, unknown> = 
       return { ...impact, recommendationBasis: "Part 21 source pack + client-approved interpretation overlay required", sourceLinks: pack.sources, recommendations: impact.remediation.map((step: string, index: number) => ({ priority: index + 1, action: step, evidenceToClose: "Attach source record and accountable approval", humanGate: "Compliance / quality approval required" })) };
     }
     case "trace_product_genealogy": {
-      const context = await getGroundedGraphContext(String(args.findingId ?? ""));
+      const context = await getGroundedGraphContext(String(args.findingId ?? ""), String(args.auditId ?? ""));
       const node = context.nodes.find((item: any) => item.id === String(args.productId ?? "prod-4820"));
       const relationships = context.edges.filter((edge: any) => edge.from === node?.id || edge.to === node?.id);
       return { root: node ?? null, relationships, related: relationships.map((edge: any) => context.nodes.find((item: any) => item.id === (edge.from === node?.id ? edge.to : edge.from))).filter(Boolean), provenance: "mysql-database graph projection", source: context.source };
     }
     case "compare_temporal_versions": {
       return {
-        entity: (await getGroundedGraphContext(String(args.findingId ?? ""))).nodes.find((item: any) => item.id === String(args.entityId ?? "prod-4820")) ?? null,
+        entity: (await getGroundedGraphContext(String(args.findingId ?? ""), String(args.auditId ?? ""))).nodes.find((item: any) => item.id === String(args.entityId ?? "prod-4820")) ?? null,
         from: args.from ?? "2025-01-01",
         to: args.to ?? "2026-04-14",
-        events: (await getGroundedGraphContext(String(args.findingId ?? ""))).temporalEvents,
+        events: (await getGroundedGraphContext(String(args.findingId ?? ""), String(args.auditId ?? ""))).temporalEvents,
         potentialCauses: [],
         involvedPeople: [],
       };

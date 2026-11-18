@@ -1,670 +1,294 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react";
-import { AnimatePresence, motion } from "framer-motion";
+import { useEffect, useState } from "react";
+import { LockKeyhole, RefreshCw } from "lucide-react";
+import { startLogin } from "@/const";
+import { trpc } from "@/lib/trpc";
+import { Admin } from "@/components/assurance/Admin";
 import {
-  Activity,
-  ArrowDownRight,
-  ArrowUpRight,
-  Bot,
-  Boxes,
-  Building2,
-  CalendarClock,
-  Check,
-  CheckCircle2,
-  ChevronRight,
-  CircleAlert,
-  CircleCheck,
-  CircleDashed,
-  ClipboardCheck,
-  Clock3,
-  Command,
-  Cpu,
-  DatabaseZap,
-  Download,
-  Eye,
-  FileCheck2,
-  FileUp,
-  FileSearch,
-  GitBranch,
-  GitCompareArrows,
-  Gauge,
-  HardHat,
-  History,
-  Inbox,
-  Layers3,
-  Link2,
-  ListChecks,
-  LockKeyhole,
-  MapPin,
-  MessageSquare,
-  MoveRight,
-  Network,
-  Paperclip,
-  Play,
-  Radio,
-  Radar,
-  RefreshCw,
-  Search,
-  ServerCog,
-  ShieldAlert,
-  ShieldCheck,
-  SlidersHorizontal,
-  Sparkles,
-  TriangleAlert,
-  GripVertical,
-  UserRoundCheck,
-  UserCog,
-  Users,
-  Waypoints,
-  Workflow,
-  X,
-  Zap,
-} from "lucide-react";
+  Empty,
+  ErrorNotice,
+  Inspector,
+  Panel,
+  ResourceState,
+} from "@/components/assurance/Common";
+import { Brand, Launch } from "@/components/assurance/Launch";
+import { Workspace } from "@/components/assurance/Workspace";
 import {
-  agentPulse,
-  getGraphNode,
-  graphEdges,
-  graphNodes,
-  mcpTools,
-  type AuditRecord,
-  type ControlRecord,
-  type EntityType,
-  type GraphNode,
-  type RiskTone,
-  type ViewId,
-} from "@shared/demo";
-import type { AuditSkillPhase } from "@shared/skills";
-import type { SimulationStep } from "@shared/execution";
-import { eccCatalog, embeddedEccModule } from "@shared/ecc";
-import type { AssurancePersona } from "@shared/personas";
-import { regulatoryTraceForFinding } from "@/lib/controlled-config";
-import { assurancePersonas, agentKitAgents, auditPhases, auditSkills, mcpConnectors, part21Ontology, part21PolicyPack, part21RegulatoryPack, loadControlledConfiguration } from "@/lib/controlled-config";
-import { Card } from "@/components/ui/card";
-import { Progress } from "@/components/ui/progress";
+  ApiError,
+  id,
+  rows,
+  storageGet,
+  storageSet,
+  useConfigurations,
+  useResource,
+  type Principal,
+  type Row,
+} from "@/components/assurance/api";
+import "@/components/assurance/assurance.css";
 
-const navItems: { id: ViewId; label: string; icon: typeof Activity; count?: string }[] = [
-  { id: "overview", label: "Command center", icon: Gauge },
-  { id: "audit", label: "Audit workbench", icon: ClipboardCheck, count: "3" },
-  { id: "graph", label: "Genealogy graph", icon: Network },
-  { id: "evidence", label: "Evidence register", icon: FileCheck2, count: "84" },
-  { id: "documents", label: "Document control", icon: FileSearch, count: "2" },
-  { id: "controls", label: "Control coverage", icon: ShieldCheck },
-  { id: "skills", label: "Audit skills", icon: Workflow },
-  { id: "policy", label: "Policy as code", icon: ShieldCheck },
-  { id: "governance", label: "Human governance", icon: Users },
-  { id: "regulatory", label: "Regulatory trace", icon: FileSearch },
-  { id: "roles", label: "Role workspaces", icon: Users },
-  { id: "agents", label: "Agent observability", icon: Bot },
-  { id: "data", label: "Data plane & MCP", icon: DatabaseZap },
-];
-
-const navGroups: Array<{ label: string; items: ViewId[] }> = [
-  { label: "Command center", items: ["overview"] },
-  { label: "Audit execution", items: ["audit", "skills", "governance"] },
-  { label: "Traceability", items: ["graph", "controls"] },
-  { label: "Evidence & reports", items: ["evidence", "documents", "policy", "regulatory"] },
-  { label: "Agent operations", items: ["roles", "agents"] },
-];
-
-const toneColor: Record<RiskTone, string> = {
-  cyan: "#59d8e8",
-  green: "#63d8a0",
-  amber: "#f2b85b",
-  red: "#f27373",
-  blue: "#80a9ff",
-};
-
-const entityIcon: Record<EntityType, typeof Activity> = {
-  requirement: ListChecks,
-  product: Boxes,
-  supplier: Building2,
-  evidence: FileCheck2,
-  person: UserRoundCheck,
-  change: GitBranch,
-  finding: ShieldAlert,
-};
-
-type DrawerModel = { eyebrow: string; title: string; subtitle: string; icon: typeof Activity; content: ReactNode };
-type DatabasePortfolio = { source: "mysql-database"; audit: AuditRecord | null; findings: any[]; evidence: any[]; controls: any[]; sources: any[]; metrics: any; suppliers: any[]; changes: any[] };
-const dashboardFindings: any[] = [];
-const supplierExposureRows: any[] = [];
-const changeRows: any[] = [];
-const activity: any[] = [];
-const audits: AuditRecord[] = [];
-const evidence: any[] = [];
-const controls: ControlRecord[] = [];
-const sources: any[] = [];
-const timelineEvents: any[] = [];
-const getAuditGraphProjection = (_auditId: string) => ({ nodes: [] as GraphNode[], edges: [] as any[] });
-
-function DetailDrawer({ model, onClose }: { model: DrawerModel; onClose: () => void }) {
-  const Icon = model.icon;
-  return <div className="drawer-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}><aside className="detail-drawer" role="dialog" aria-modal="true"><div className="drawer-head"><div className="drawer-icon"><Icon size={17} /></div><div><span className="tiny-label">{model.eyebrow}</span><h2>{model.title}</h2><p>{model.subtitle}</p></div><button className="icon-button" aria-label="Close details" onClick={onClose}><X size={15} /></button></div><div className="drawer-body">{model.content}</div></aside></div>;
-}
-
-function DrawerMetricSummary({ formula, rows, footer }: { formula: string; rows: Array<{ label: string; value: string; detail: string }>; footer: string }) {
-  return <><div className="drawer-formula"><span className="tiny-label">CALCULATION TRACE</span><strong>{formula}</strong></div><div className="drawer-stat-list">{rows.map((row) => <div className="drawer-stat-row" key={row.label}><div><strong>{row.label}</strong><small>{row.detail}</small></div><b>{row.value}</b></div>)}</div><div className="drawer-footer-note"><CircleCheck size={14} />{footer}</div></>;
-}
-
-function StatusDot({ tone = "cyan", pulse = false }: { tone?: RiskTone; pulse?: boolean }) {
-  return <span className={`status-dot ${pulse ? "pulse" : ""}`} style={{ background: toneColor[tone], boxShadow: `0 0 0 3px ${toneColor[tone]}20` }} />;
-}
-
-function Badge({ children, tone = "cyan", subtle = false }: { children: ReactNode; tone?: RiskTone; subtle?: boolean }) {
-  return <span className={`badge ${subtle ? "badge-subtle" : ""}`} style={{ color: toneColor[tone], borderColor: `${toneColor[tone]}42`, background: `${toneColor[tone]}12` }}>{children}</span>;
-}
-
-function SectionKicker({ icon: Icon, children }: { icon: typeof Activity; children: ReactNode }) {
-  return <div className="section-kicker"><Icon size={13} strokeWidth={2.5} /><span>{children}</span></div>;
-}
-
-function LaunchWorkspace({ onEnter, initialAudits }: { onEnter: (persona: AssurancePersona, audit: AuditRecord, auditList: AuditRecord[]) => void; initialAudits: AuditRecord[] }) {
-  const [selectedPersona, setSelectedPersona] = useState(assurancePersonas[0].id);
-  const [selectedAudit, setSelectedAudit] = useState(initialAudits[0]?.id ?? "");
-  const [auditList, setAuditList] = useState<AuditRecord[]>(initialAudits);
-  const [showCreate, setShowCreate] = useState(false);
-  const [newAudit, setNewAudit] = useState({ title: "", standard: "10 CFR Part 21", scope: "", owner: "", due: "" });
-  const persona = assurancePersonas.find((item) => item.id === selectedPersona) ?? assurancePersonas[0];
-  const chosenAudit = auditList.find((item) => item.id === selectedAudit) ?? auditList[0];
-  const createAudit = () => { if (!newAudit.title || !newAudit.scope || !newAudit.owner || !newAudit.due) return; const created: AuditRecord = { id: `AUD-${String(27 + auditList.length).padStart(3, "0")}`, title: newAudit.title, standard: newAudit.standard, scope: newAudit.scope, owner: newAudit.owner, due: newAudit.due, progress: 0, evidence: "0 / 0 linked", status: "Planned", findings: 0 }; setAuditList([...auditList, created]); setSelectedAudit(created.id); setShowCreate(false); setNewAudit({ title: "", standard: "10 CFR Part 21", scope: "", owner: "", due: "" }); };
-  return <div className="launch-shell"><div className="launch-topbar"><div className="brand launch-brand"><div className="brand-mark"><span /><span /><span /></div><div><strong>PART 21</strong><small>ASSURANCE OS</small></div></div><div className="launch-top-meta"><span><StatusDot tone="green" pulse />5 sources healthy</span><span>Embedded ECC module · v2.2.3</span><span>Northstar / Nuclear Assurance</span></div></div><main className="launch-content"><section className="launch-hero"><div><div className="eyebrow"><StatusDot tone="cyan" pulse />ASSURANCE OPERATING SYSTEM <span>·</span> INITIALIZE SESSION</div><h1>Start with the decision you need to make.</h1><p>Choose the accountable persona, resume an existing audit, or open a new audit workspace. The system will load the right evidence, graph, skills, agents, and human gates for that context.</p></div><div className="launch-hero-orbit"><div className="orbit-ring ring-one" /><div className="orbit-ring ring-two" /><div className="orbit-core"><ShieldCheck size={30} /></div></div></section><div className="launch-stats"><div><strong>{auditList.length}</strong><span>audits available</span></div><div><strong>{auditList.reduce((sum, item) => sum + item.findings, 0) + 9}</strong><span>findings in portfolio</span></div><div><strong>8</strong><span>local skills loaded</span></div><div><strong>5</strong><span>agents ready</span></div></div><section className="launch-grid"><div className="launch-panel persona-launch-panel"><div className="launch-panel-head"><div><span className="tiny-label">01 · WHO ARE YOU?</span><h2>Select your assurance lens</h2><p>Your persona changes the default workspace, alerts, and next questions.</p></div><Badge tone="cyan">Required</Badge></div><div className="launch-personas">{assurancePersonas.map((item) => <button key={item.id} className={`launch-persona ${item.id === selectedPersona ? "active" : ""}`} onClick={() => setSelectedPersona(item.id)}><span className="launch-persona-icon"><UserCog size={17} /></span><span><strong>{item.label}</strong><small>{item.title}</small><em>{item.description}</em></span>{item.id === selectedPersona && <CheckCircle2 size={17} />}</button>)}</div></div><div className="launch-panel audit-launch-panel"><div className="launch-panel-head"><div><span className="tiny-label">02 · WHAT ARE YOU WORKING ON?</span><h2>Resume or start an audit</h2><p>Prior audits retain their graph, findings, evidence, and decision history.</p></div><button className="ghost-button" onClick={() => setShowCreate(!showCreate)}><Sparkles size={13} />New audit</button></div>{showCreate && <div className="create-audit-form"><label>Audit title<input value={newAudit.title} onChange={(event) => setNewAudit({ ...newAudit, title: event.target.value })} placeholder="e.g. Unit 3 supplier change review" /></label><label>Standard<input value={newAudit.standard} onChange={(event) => setNewAudit({ ...newAudit, standard: event.target.value })} /></label><label>Scope<input value={newAudit.scope} onChange={(event) => setNewAudit({ ...newAudit, scope: event.target.value })} placeholder="Product, supplier, or activity scope" /></label><label>Owner<input value={newAudit.owner} onChange={(event) => setNewAudit({ ...newAudit, owner: event.target.value })} placeholder="Accountable owner" /></label><label>Due date<input type="date" value={newAudit.due} onChange={(event) => setNewAudit({ ...newAudit, due: event.target.value })} /></label><button className="primary-button" onClick={createAudit} disabled={!newAudit.title || !newAudit.scope || !newAudit.owner || !newAudit.due}><Check size={13} />Create audit</button></div>}<div className="launch-audit-list">{auditList.map((item) => <button key={item.id} className={`launch-audit-card ${item.id === selectedAudit ? "active" : ""}`} onClick={() => setSelectedAudit(item.id)}><div className="launch-audit-top"><span>{item.id}</span><Badge tone={item.status === "In progress" ? "green" : item.status === "Ready for review" ? "cyan" : "amber"} subtle>{item.status}</Badge></div><strong>{item.title}</strong><p>{item.standard} · {item.scope}</p><div className="launch-audit-meta"><span><UserRoundCheck size={11} />{item.owner}</span><span><CalendarClock size={11} />Due {item.due}</span><span>{item.progress}% ready</span></div><div className="launch-progress"><span style={{ width: `${item.progress}%` }} /></div></button>)}</div></div></section><section className="launch-bottom"><div className="launch-context-card"><div className="launch-context-icon"><Workflow size={18} /></div><div><span className="tiny-label">SESSION PREVIEW</span><strong>{persona.title} · {chosenAudit?.id}</strong><p>{persona.description} Your default landing view will be <b>{persona.defaultView}</b>, with {chosenAudit?.evidence} evidence and {chosenAudit?.findings} findings in scope.</p></div></div><button className="launch-start-button" onClick={() => chosenAudit && onEnter(persona, chosenAudit, auditList)} disabled={!chosenAudit}><span>Enter assurance workspace</span><ArrowUpRight size={17} /></button></section><div className="launch-footer"><span>Part 21 Assurance OS · synthetic data environment</span><span>Embedded ECC module · 8 local skills · human-gated by design</span></div></main></div>;
-}
-
-function AuditSwitchPanel({ activeAudit, auditList, onSelect }: { activeAudit: AuditRecord; auditList: AuditRecord[]; onSelect: (audit: AuditRecord) => void }) {
-  const [query, setQuery] = useState("");
-  const filtered = auditList.filter((audit) => `${audit.id} ${audit.title} ${audit.scope} ${audit.owner}`.toLowerCase().includes(query.toLowerCase()));
-  return <div className="audit-switch-panel"><div className="audit-switch-summary"><div className="launch-context-icon"><ClipboardCheck size={17} /></div><div><span className="tiny-label">ACTIVE AUDIT</span><strong>{activeAudit.id} · {activeAudit.title}</strong><p>Switching the audit changes the graph, evidence queue, findings, skills, and agent context.</p></div></div><label className="audit-switch-search"><Search size={13} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search audits, scopes, owners…" /></label><div className="audit-switch-list">{filtered.map((audit) => <button key={audit.id} className={`audit-switch-row ${audit.id === activeAudit.id ? "active" : ""}`} onClick={() => onSelect(audit)}><div><div className="audit-switch-row-top"><span>{audit.id}</span><Badge tone={audit.status === "In progress" ? "green" : audit.status === "Ready for review" ? "cyan" : "amber"} subtle>{audit.status}</Badge></div><strong>{audit.title}</strong><small>{audit.standard} · {audit.scope}</small><small>{audit.owner} · Due {audit.due} · {audit.progress}% ready · {audit.findings} findings</small></div>{audit.id === activeAudit.id ? <CheckCircle2 size={16} /> : <ChevronRight size={16} />}</button>)}{filtered.length === 0 && <div className="empty-switcher">No audits match “{query}”.</div>}</div><div className="audit-switch-footer"><span><CircleCheck size={13} />{auditList.length} audits in this workspace</span><span>Every switch is recorded in the session trace</span></div></div>;
-}
-
-function MetricCard({ label, value, delta, detail, icon: Icon, tone, trend = "up", onOpen }: { label: string; value: string | number; delta: string; detail: string; icon: typeof Activity; tone: RiskTone; trend?: "up" | "down"; onOpen: () => void }) {
+function AuthenticatedHome({
+  principal,
+  onLogout,
+  refreshSession,
+}: {
+  principal: Principal;
+  onLogout: () => void;
+  refreshSession: () => void;
+}) {
+  const audits = useResource("/api/domain/audits");
+  const personas = useConfigurations("persona");
+  const prefix = `assurance:${principal.id}`;
+  const [auditId, setAuditId] = useState(() => storageGet(`${prefix}:audit`));
+  const [lensId, setLensId] = useState(() => storageGet(`${prefix}:lens`));
+  const [entered, setEntered] = useState(
+    () => storageGet(`${prefix}:entered`) === "true"
+  );
+  const [admin, setAdmin] = useState(false);
+  const list = rows(audits.data, "audits").filter(
+    row =>
+      principal.isAdmin ||
+      !Array.isArray(principal.auditIds) ||
+      principal.auditIds.includes(id(row)) ||
+      principal.auditIds.includes(String(row.auditId ?? ""))
+  );
+  const validAudit = list.some(row => id(row) === auditId);
+  const validLens = personas.data.some(row => id(row) === lensId);
+  const onAudit = (value: string) => {
+    setAuditId(value);
+    storageSet(`${prefix}:audit`, value);
+  };
+  const onLens = (value: string) => {
+    setLensId(value);
+    storageSet(`${prefix}:lens`, value);
+  };
+  const onCreated = (audit: Row) => {
+    onAudit(id(audit));
+    audits.refresh();
+  };
+  if (
+    entered &&
+    ((audits.loading && audits.data == null) ||
+      (personas.loading && personas.data == null))
+  )
+    return (
+      <div className="launch-shell">
+        <main className="launch-content">
+          <Panel title="Reloading authenticated workspace">
+            <ResourceState resource={audits} />
+            <ResourceState resource={personas} />
+          </Panel>
+        </main>
+      </div>
+    );
+  if (entered && (audits.error || personas.error))
+    return (
+      <div className="launch-shell">
+        <main className="launch-content">
+          <Panel
+            title="Authenticated scope could not be loaded"
+            subtitle="The workspace is blocked rather than entering with a stale lens or audit list."
+          >
+            <ResourceState resource={audits} />
+            <ResourceState resource={personas} />
+          </Panel>
+        </main>
+      </div>
+    );
+  if (entered && validAudit && validLens)
+    return (
+      <Workspace
+        key={auditId}
+        principal={principal}
+        auditId={auditId}
+        auditList={list}
+        personas={personas.data}
+        lensId={lensId}
+        onLens={onLens}
+        onAudit={onAudit}
+        onCreated={onCreated}
+        onLogout={onLogout}
+        refreshSession={refreshSession}
+      />
+    );
   return (
-    <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} whileHover={{ y: -3 }} transition={{ duration: .28, ease: "easeOut" }}>
-    <Card className="metric-card metric-card-action" onClick={onOpen} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") onOpen(); }} role="button" tabIndex={0}>
-      <div className="metric-top"><div className="metric-icon" style={{ color: toneColor[tone], background: `${toneColor[tone]}12` }}><Icon size={16} /></div><span className="metric-label">{label}</span><span className="metric-menu">···</span></div>
-      <div className="metric-value-row"><strong>{value}</strong><span className={`metric-delta ${trend === "down" ? "delta-down" : ""}`}><ArrowUpRight size={13} />{delta}</span></div>
-      <div className="metric-detail">{detail} <span className="metric-drill">Inspect calculation <ArrowUpRight size={11} /></span></div>
-      <Progress value={label === "Audit readiness" ? Number.parseInt(String(value), 10) : 68} className="metric-progress" aria-label={`${label} progress`} />
-      <div className="metric-spark" aria-hidden="true"><span style={{ height: "38%" }} /><span style={{ height: "52%" }} /><span style={{ height: "45%" }} /><span style={{ height: "68%" }} /><span style={{ height: "58%" }} /><span style={{ height: "78%" }} /><span style={{ height: "92%", background: toneColor[tone] }} /></div>
-    </Card>
-    </motion.div>
+    <>
+      <div className="assurance-launch-actions">
+        <button className="ghost-button" onClick={refreshSession}>
+          <RefreshCw size={13} />
+          Refresh session / scope
+        </button>
+        {principal.isAdmin && (
+          <button className="ghost-button" onClick={() => setAdmin(true)}>
+            Access & configuration administration
+          </button>
+        )}
+        <button className="ghost-button" onClick={onLogout}>
+          Sign out
+        </button>
+      </div>
+      <Launch
+        principal={principal}
+        audits={audits}
+        personas={personas}
+        selectedAudit={auditId}
+        selectedLens={lensId}
+        onAudit={onAudit}
+        onLens={onLens}
+        onCreated={onCreated}
+        refreshAudits={audits.refresh}
+        onEnter={() => {
+          setEntered(true);
+          storageSet(`${prefix}:entered`, "true");
+        }}
+      />
+      {entered &&
+        (!validAudit || !validLens) &&
+        !audits.loading &&
+        !personas.loading && (
+          <div className="assurance-scope-notice">
+            The saved audit or persona is no longer available. Select an
+            authorized audit and active lens; no fallback context is used.
+          </div>
+        )}
+      {!principal.isAdmin &&
+        !audits.loading &&
+        !audits.error &&
+        !list.length && (
+          <div className="assurance-scope-notice">
+            No audit scope is granted to principal {principal.id}. Ask an
+            application administrator to issue an explicit audit grant.
+            Selecting a lens cannot grant access and a read-only connector
+            cannot be elevated.
+          </div>
+        )}
+      {admin && (
+        <Inspector
+          title="Administrator scope & configuration setup"
+          description="No audit is silently selected. Actual directory, grants and immutable configuration revisions only."
+          onClose={() => setAdmin(false)}
+        >
+          <Admin
+            principal={principal}
+            auditId={validAudit ? auditId : undefined}
+          />
+        </Inspector>
+      )}
+    </>
   );
 }
-
-function GraphCanvas({ selectedId, onSelect, compact = false, nodes = graphNodes, edges = graphEdges }: { selectedId: string; onSelect: (id: string) => void; compact?: boolean; nodes?: GraphNode[]; edges?: typeof graphEdges }) {
-  const nodesById = Object.fromEntries(nodes.map((node) => [node.id, node]));
+export default function Home() {
+  const session = useResource<{ principal: Principal; auditIds?: string[] }>(
+    "/api/session"
+  );
+  const [expired, setExpired] = useState(false);
+  const [loginError, setLoginError] = useState<string | null>(null);
+  const logout = trpc.auth.logout.useMutation();
+  const utilities = trpc.useUtils();
+  useEffect(() => {
+    const expire = () => setExpired(true);
+    window.addEventListener("assurance-session-expired", expire);
+    return () =>
+      window.removeEventListener("assurance-session-expired", expire);
+  }, []);
+  const refresh = () => {
+    setExpired(false);
+    session.refresh();
+  };
+  const signOut = async () => {
+    try {
+      await logout.mutateAsync();
+    } catch (error) {
+      setLoginError(error instanceof Error ? error.message : String(error));
+    } finally {
+      try {
+        sessionStorage.removeItem("manus-cookie");
+      } catch {}
+      utilities.auth.me.setData(undefined, null);
+      setExpired(true);
+      session.refresh();
+    }
+  };
+  const principal = !expired ? session.data?.principal : null;
+  if (principal?.id)
+    return (
+      <AuthenticatedHome
+        key={String(principal.id)}
+        principal={principal}
+        onLogout={() => void signOut()}
+        refreshSession={refresh}
+      />
+    );
+  const unauthorized =
+    expired ||
+    (session.error instanceof ApiError && session.error.status === 401);
+  const configured = Boolean(
+    window.__MANUS_CONFIG__?.oauthPortalUrl &&
+      window.__MANUS_CONFIG__?.projectId
+  );
   return (
-    <div className={`graph-canvas ${compact ? "graph-compact" : ""}`}>
-      <svg viewBox="0 0 820 370" role="img" aria-label="Part 21 entity relationship graph">
-        <defs>
-          <pattern id="graph-grid" width="36" height="36" patternUnits="userSpaceOnUse"><path d="M 36 0 L 0 0 0 36" fill="none" stroke="#b7d0ef" strokeOpacity=".07" strokeWidth="1" /></pattern>
-          <filter id="node-glow"><feGaussianBlur stdDeviation="4" result="coloredBlur" /><feMerge><feMergeNode in="coloredBlur" /><feMergeNode in="SourceGraphic" /></feMerge></filter>
-        </defs>
-        <rect width="820" height="370" fill="url(#graph-grid)" />
-        {edges.map((edge) => {
-          const from = nodesById[edge.from]; const to = nodesById[edge.to];
-          return <g key={`${edge.from}-${edge.to}`} className="graph-edge-group"><line x1={from.x} y1={from.y} x2={to.x} y2={to.y} stroke={toneColor[edge.tone]} strokeOpacity=".42" strokeWidth={selectedId === edge.from || selectedId === edge.to ? 2.7 : 1.4} strokeDasharray={edge.tone === "red" ? "5 4" : ""} /><text x={(from.x + to.x) / 2} y={(from.y + to.y) / 2 - 7} textAnchor="middle" fill="#91a7c4" fontSize="9" letterSpacing=".08em">{edge.label.toUpperCase()}</text></g>;
-        })}
-        {nodes.map((node) => {
-          const Icon = entityIcon[node.type];
-          const isSelected = selectedId === node.id;
-          return <g key={node.id} className={`graph-node ${isSelected ? "selected" : ""}`} onClick={() => onSelect(node.id)} role="button" tabIndex={0} onKeyDown={(event) => { if (event.key === "Enter") onSelect(node.id); }}>
-            {isSelected && <circle cx={node.x} cy={node.y} r="32" fill="none" stroke={toneColor[node.tone]} strokeOpacity=".18" strokeWidth="8" filter="url(#node-glow)" />}
-            <circle cx={node.x} cy={node.y} r={isSelected ? 22 : 18} fill="#101b2b" stroke={toneColor[node.tone]} strokeWidth={isSelected ? 2.5 : 1.5} />
-            <foreignObject x={node.x - 10} y={node.y - 10} width="20" height="20"><div className="graph-node-icon" style={{ color: toneColor[node.tone] }}><Icon size={13} /></div></foreignObject>
-            <text x={node.x} y={node.y + 39} textAnchor="middle" fill={isSelected ? "#f5f9ff" : "#b8c8dc"} fontSize="11" fontWeight={isSelected ? 700 : 500}>{node.label}</text>
-            <text x={node.x} y={node.y + 52} textAnchor="middle" fill="#71839c" fontSize="8" letterSpacing=".08em">{node.meta.toUpperCase()}</text>
-          </g>;
-        })}
-      </svg>
-      <div className="graph-legend"><span><i className="legend-line" style={{ background: toneColor.cyan }} />governs</span><span><i className="legend-line" style={{ background: toneColor.green }} />evidence</span><span><i className="legend-line" style={{ background: toneColor.red }} />risk / change</span><span className="graph-hint">Select an entity to inspect the trace</span></div>
+    <div className="launch-shell">
+      <div className="launch-topbar">
+        <Brand />
+      </div>
+      <main className="launch-content assurance-login">
+        <Panel
+          title={
+            session.loading && !expired
+              ? "Checking authenticated session…"
+              : unauthorized
+                ? "Sign in before opening assurance records."
+                : "Authentication service unavailable"
+          }
+          subtitle="Identity and server-issued audit access are required up front. No anonymous demo, persona-based privilege or static audit fallback is available."
+        >
+          <LockKeyhole size={28} />
+          {!unauthorized && <ErrorNotice error={session.error} />}
+          <ErrorNotice error={loginError} />
+          {session.loading && !expired ? (
+            <Empty>
+              Checking the existing cookie / Preview authorization session.
+            </Empty>
+          ) : (
+            <>
+              <div className="assurance-inline">
+                <button
+                  className="primary-button"
+                  disabled={!configured}
+                  onClick={() => {
+                    try {
+                      setLoginError(null);
+                      startLogin();
+                    } catch (error) {
+                      setLoginError(
+                        error instanceof Error ? error.message : String(error)
+                      );
+                    }
+                  }}
+                >
+                  Sign in with existing application login
+                </button>
+                <button className="ghost-button" onClick={refresh}>
+                  <RefreshCw size={13} />
+                  Retry session
+                </button>
+              </div>
+              {!configured && (
+                <Empty>
+                  The existing OAuth portal / project configuration is not
+                  available. Configure the actual application login; no
+                  substitute authentication is provided.
+                </Empty>
+              )}
+              {unauthorized && (
+                <p>
+                  Anonymous HTTP access is intentionally unavailable. An
+                  administrator must grant audit scope after successful
+                  authentication.
+                </p>
+              )}
+            </>
+          )}
+        </Panel>
+      </main>
     </div>
   );
-}
-
-function AgentRail({ onRun }: { onRun: (label: string) => void }) {
-  return (
-    <aside className="agent-rail">
-      <div className="agent-rail-head"><div className="agent-orb"><Bot size={18} /></div><div><div className="agent-title">Assurance agents</div><div className="agent-subtitle"><StatusDot tone="green" pulse /> {agentPulse.state} · 3 watchers active</div></div><button className="icon-button" aria-label="Agent settings"><SlidersHorizontal size={15} /></button></div>
-      <div className="agent-context"><div className="tiny-label">Current operating context</div><strong>Unit 2 / NSS-4820</strong><span>Audit AUD-026 · traceability & configuration</span></div>
-      <div className="recommendation"><div className="recommendation-head"><Sparkles size={14} /><span>RECOMMENDED NEXT MOVE</span><Badge tone="amber">Review</Badge></div><p>{agentPulse.recommendation}</p><button className="text-button" onClick={() => onRun("Recommendation accepted · opened F-042 trace")}>Open trace <ChevronRight size={14} /></button></div>
-      <div className="agent-activity-head"><span>Live activity</span><span className="agent-activity-meta">{agentPulse.coverage}</span></div>
-      <div className="activity-list">{activity.map((item) => <div className="activity-item" key={`${item.time}-${item.title}`}><StatusDot tone={item.tone} pulse={item.tone === "red"} /><div><div className="activity-title">{item.title}<span>{item.time}</span></div><p>{item.detail}</p></div></div>)}</div>
-      <div className="agent-actions"><button onClick={() => onRun("Readiness check completed · 82% coverage")}><Radar size={14} />Run readiness check</button><button onClick={() => onRun("Genealogy trace queued · 8 entities")}><GitCompareArrows size={14} />Trace genealogy</button><button onClick={() => onRun("Supplier risk scan completed · watch status")}><Building2 size={14} />Scan supplier risk</button></div>
-      <div className="agent-foot"><Radio size={13} /><span>Every recommendation keeps its evidence basis and asks for human review before action.</span></div>
-    </aside>
-  );
-}
-
-function ActiveAudit({ onOpen, audit }: { onOpen: () => void; audit: AuditRecord }) {
-  const linkedCount = audit.evidence.split("/")[1]?.replace("linked", "").trim() ?? "—";
-  return <article className="panel active-audit"><div className="panel-head"><div><SectionKicker icon={ClipboardCheck}>Active audit</SectionKicker><h2>{audit.title}</h2><p>{audit.standard} <span className="muted-dot">·</span> {audit.scope}</p></div><button className="ghost-button" onClick={onOpen}>Open workbench <ArrowUpRight size={14} /></button></div><div className="audit-identity"><div className="audit-id">{audit.id}</div><Badge tone="amber">{audit.status}</Badge><div className="audit-owner"><span className="avatar avatar-cyan">ML</span><span><b>{audit.owner}</b><small>audit lead</small></span></div><div className="audit-due"><CalendarClock size={15} /><span><small>DUE</small>{audit.due}</span></div></div><div className="audit-progress-row"><div><span className="tiny-label">Evidence coverage</span><strong>{audit.evidence}</strong></div><div className="progress-bar"><span style={{ width: `${audit.progress}%` }} /></div><strong className="progress-number">{audit.progress}%</strong></div><div className="audit-foot"><span><CircleAlert size={14} className="icon-amber" />{audit.findings} open findings in scope</span><span><Link2 size={14} />{linkedCount} linked records</span><button className="text-button" onClick={onOpen}>Continue audit <ChevronRight size={14} /></button></div></article>;
-}
-
-function TemporalTrace({ onRun }: { onRun: (label: string) => void }) {
-  const [mode, setMode] = useState<"before" | "after">("after");
-  const visibleEvents = mode === "before" ? timelineEvents.slice(0, 2) : timelineEvents.slice(2);
-  return <article className="panel temporal-panel"><div className="panel-head"><div><SectionKicker icon={History}>Temporal trace</SectionKicker><h2>What changed, and why?</h2><p>Selected context: <strong>NSS-4820</strong> · effective state comparison</p></div><button className="icon-button" aria-label="Refresh temporal trace" onClick={() => onRun("Temporal trace refreshed · 5 events resolved")}><RefreshCw size={15} /></button></div><div className="temporal-toggle"><button className={mode === "before" ? "active" : ""} onClick={() => setMode("before")}>Before <span>14 Mar 2026</span></button><div className="temporal-arrow"><ArrowDownRight size={13} /></div><button className={mode === "after" ? "active" : ""} onClick={() => setMode("after")}>After <span>14 Apr 2026</span></button></div><div className="timeline">{visibleEvents.map((event) => <div className="timeline-row" key={event.id}><div className={`timeline-marker marker-${event.type}`}><span /></div><div className="timeline-date">{event.date}</div><div className="timeline-copy"><strong>{event.title}</strong><p>{event.detail}</p><small>{event.actor} <span>·</span> <b>{event.impact}</b></small></div></div>)}</div><div className="temporal-foot"><span><GitCompareArrows size={14} />{mode === "before" ? "2 baseline events" : "3 change-impact events"}</span><button className="text-button" onClick={() => onRun("Temporal compare exported · CHG-014 context")}>Compare full history <ArrowUpRight size={14} /></button></div></article>;
-}
-
-function SelectedNode({ node, onRun, onOpen, nodes = graphNodes, edges = graphEdges }: { node: GraphNode; onRun: (label: string) => void; onOpen?: (model: DrawerModel) => void; nodes?: GraphNode[]; edges?: typeof graphEdges }) {
-  const Icon = entityIcon[node.type];
-  const linked = edges.filter((edge) => edge.from === node.id || edge.to === node.id);
-  const open = () => onOpen ? onOpen({ eyebrow: `GRAPH ENTITY · ${node.type.toUpperCase()}`, title: node.label, subtitle: `${node.meta} · ${node.status} · ${linked.length} direct relationships`, icon: Icon, content: <><div className="drawer-section"><span className="tiny-label">WHY THIS NODE MATTERS</span><p>{node.description}</p></div><div className="drawer-section"><span className="tiny-label">RELATIONSHIPS EXPLAINED</span><div className="relationship-list">{linked.map((edge) => { const otherId = edge.from === node.id ? edge.to : edge.from; const other = nodes.find((candidate) => candidate.id === otherId) ?? graphNodes[2]; return <div className="relationship-row" key={`${edge.from}-${edge.to}`}><span className="relationship-line" style={{ background: toneColor[edge.tone] }} /><span><strong>{edge.label}</strong><small>{node.label} {edge.from === node.id ? "→" : "←"} {other.label} · {other.type}</small></span><Badge tone={edge.tone} subtle>{edge.tone === "red" ? "risk / change" : edge.tone === "green" ? "evidence" : "governs"}</Badge></div>; })}</div></div><div className="drawer-section"><span className="tiny-label">PROVENANCE</span><p>Synthetic graph edge · source joins include quality system, supplier portal, document control, people directory, and change control. Every edge is a candidate trace until source evidence and human approval are confirmed.</p></div></> }) : onRun(`Trace opened · ${node.label} · ${linked.length} relationships`);
-  return <div className="selected-node"><div className="selected-node-top"><div className="selected-node-icon" style={{ color: toneColor[node.tone], background: `${toneColor[node.tone]}15` }}><Icon size={17} /></div><div><span className="tiny-label">Selected entity</span><strong>{node.label}</strong><small>{node.meta} · {node.status}</small></div><button className="icon-button"><X size={14} /></button></div><p>{node.description}</p><div className="selected-links"><span><Waypoints size={13} />{linked.length} direct relationships</span><span><FileSearch size={13} />3 evidence items</span></div><button className="full-button" onClick={open}>Open full trace <ArrowUpRight size={14} /></button></div>;
-}
-
-function GenealogyPreview({ onOpen, onRun, onOpenDrawer, projection }: { onOpen: () => void; onRun: (label: string) => void; onOpenDrawer?: (model: DrawerModel) => void; projection: ReturnType<typeof getAuditGraphProjection> }) {
-  const [selectedId, setSelectedId] = useState(projection.nodes[0]?.id ?? "prod-4820");
-  const node = projection.nodes.find((candidate) => candidate.id === selectedId) ?? projection.nodes[0];
-  return <article className="panel graph-panel"><div className="panel-head"><div><SectionKicker icon={Network}>Knowledge graph</SectionKicker><h2>Trace the assurance chain</h2><p>8 entities · 8 relationships · live synthetic graph</p></div><button className="ghost-button" onClick={onOpen}>Explore graph <ArrowUpRight size={14} /></button></div><GraphCanvas selectedId={selectedId} onSelect={setSelectedId} compact nodes={projection.nodes} edges={projection.edges} /><SelectedNode node={node} onRun={onRun} onOpen={onOpenDrawer} nodes={projection.nodes} edges={projection.edges} /></article>;
-}
-
-function FindingList({ onOpen, findings: scopedFindings }: { onOpen: (model: DrawerModel) => void; findings: typeof dashboardFindings }) {
-  const openFinding = (finding: (typeof dashboardFindings)[number]) => onOpen({ eyebrow: `FINDING · ${finding.source}`, title: `${finding.id} · ${finding.title}`, subtitle: `${finding.severity} · ${finding.age} open · owner ${finding.owner}`, icon: ShieldAlert, content: <><div className="drawer-chip-row"><Badge tone={finding.severity === "Major" ? "red" : finding.severity === "Moderate" ? "amber" : "blue"}>Risk: {finding.severity}</Badge><Badge tone="amber">{finding.status}</Badge><Badge tone="cyan">Traceable</Badge></div><div className="drawer-section"><span className="tiny-label">WHY THIS IS OPEN</span><p>The agent linked this finding to a source record, an accountable owner, and a control/evidence gap. It cannot be closed without a human disposition and supporting evidence.</p></div><div className="drawer-section"><span className="tiny-label">TRACE</span><div className="drawer-trace"><span>{finding.source}</span><ChevronRight size={12} /><span>{finding.owner}</span><ChevronRight size={12} /><span>Audit AUD-026</span><ChevronRight size={12} /><span>Control review</span></div></div><div className="drawer-section"><span className="tiny-label">NEXT BEST ACTION</span><div className="drawer-action"><Sparkles size={14} /><strong>Open evidence chain and request owner response</strong><small>Agent recommendation · human review required</small></div></div></> });
-  return <article className="panel findings-panel"><div className="panel-head"><div><SectionKicker icon={ShieldAlert}>Finding queue</SectionKicker><h2>Needs accountable attention</h2><p>Prioritized by risk, age, and evidence weakness · 12 open items</p></div><button className="icon-button" aria-label="Open finding filters"><SlidersHorizontal size={15} /></button></div><div className="finding-list">{scopedFindings.slice(0, 4).map((finding) => <button className="finding-row" key={finding.id} onClick={() => openFinding(finding)}><span className={`finding-severity severity-${finding.severity.toLowerCase()}`}><span />{finding.severity}</span><div className="finding-main"><strong>{finding.id} · {finding.title}</strong><small>{finding.source} <span>·</span> owner {finding.owner}</small></div><span className="finding-age">{finding.age}<ChevronRight size={14} /></span></button>)}</div><button className="panel-link" onClick={() => onOpen({ eyebrow: "FINDING REGISTER", title: "12 open findings", subtitle: "Synthetic register · prioritized by severity, age, owner, and evidence weakness", icon: ShieldAlert, content: <div className="drawer-table">{scopedFindings.map((finding) => <button key={finding.id} className="drawer-table-row" onClick={() => openFinding(finding)}><span className={`finding-severity severity-${finding.severity.toLowerCase()}`}><span />{finding.severity}</span><span><strong>{finding.id}</strong><small>{finding.title}</small></span><em>{finding.age}</em><ChevronRight size={13} /></button>)}</div> })}>View all 12 findings <ArrowUpRight size={14} /></button></article>;
-}
-
-function Overview({ onNavigate, onOpenDrawer, activeAudit, persona, portfolio }: { onNavigate: (view: ViewId) => void; onOpenDrawer: (model: DrawerModel) => void; activeAudit: AuditRecord; persona: AssurancePersona; portfolio: DatabasePortfolio }) {
-  const scopedFindings = portfolio.findings;
-  const liveMetrics = portfolio.metrics as any;
-  const projection = getAuditGraphProjection(activeAudit.id);
-  const openReadiness = () => onOpenDrawer({ eyebrow: "READINESS MODEL", title: "Audit readiness · 82%", subtitle: `Synthetic calculation for ${activeAudit.id} · ${activeAudit.title}`, icon: Gauge, content: <DrawerMetricSummary formula="Weighted result = control coverage 40% + evidence freshness 25% + finding posture 20% + source health 15%" rows={[{ label: "Control coverage", value: "86%", detail: "34 of 42 mapped controls healthy or watch" }, { label: "Evidence freshness", value: "79%", detail: "4 stale records across 84,951 indexed items" }, { label: "Finding posture", value: "74%", detail: "12 open findings · 2 urgent · 1 major" }, { label: "Source health", value: "92%", detail: "5 sources healthy · 1 document repository watch" }]} footer="Weekly baseline: 74.6% on 10 Nov 2026 · current result is +7.4 percentage points" /> });
-  const openFindings = () => onOpenDrawer({ eyebrow: "OPEN FINDINGS", title: `${scopedFindings.length} findings need accountable attention`, subtitle: `Scoped to ${activeAudit.id} · the metric is a live register count, not a decorative KPI`, icon: ShieldAlert, content: <div className="drawer-table">{scopedFindings.map((finding) => <div key={finding.id} className="drawer-table-row"><span className={`finding-severity severity-${finding.severity.toLowerCase()}`}><span />{finding.severity}</span><span><strong>{finding.id}</strong><small>{finding.title}</small></span><em>{finding.owner}</em><em>{finding.age}</em></div>)}</div> });
-  const openSuppliers = () => onOpenDrawer({ eyebrow: "SUPPLIER EXPOSURE", title: `${portfolio.suppliers.length} suppliers linked to active risk`, subtitle: "Exposure is read from the active MySQL audit portfolio", icon: Building2, content: <div className="drawer-table">{portfolio.suppliers.map((supplier: any) => <div key={supplier.id} className="drawer-table-row supplier-row"><span><strong>{supplier.label}</strong><small>{supplier.id} · {supplier.meta}</small></span><Badge tone="amber">Database record</Badge><span><small>Graph-linked supplier entity</small></span><ChevronRight size={13} /></div>)}</div> });
-  const openChanges = () => onOpenDrawer({ eyebrow: "CHANGE REGISTER", title: `${portfolio.changes.length} changes in the active portfolio`, subtitle: "Change entities are read from the active MySQL domain store and connected graph", icon: GitBranch, content: <><DrawerMetricSummary formula="Domain store change records grouped by active audit" rows={[{ label: "Database records", value: String(portfolio.changes.length), detail: "Loaded from part21_domain_records" }, { label: "Source", value: "MySQL", detail: "No TypeScript fallback" }, { label: "Graph link", value: "Enabled", detail: "Temporal graph context available" }]} footer="Select the genealogy graph to inspect temporal impact and affected evidence" /><div className="drawer-table change-drawer-table">{portfolio.changes.map((change: any) => <div key={change.id} className="drawer-table-row"><span><strong>{change.id}</strong><small>{change.label}</small></span><span><small>{change.meta}</small></span><Badge tone="blue">Database record</Badge></div>)}</div></> });
-  return <>
-    <div className="persona-focus-strip"><div><span className="tiny-label">PERSONA LENS</span><strong>{persona.title}</strong><p>{persona.description}</p></div><div className="persona-focus-list">{persona.focus.map((focus) => <Badge tone="cyan" subtle key={focus}>{focus}</Badge>)}</div><div className="persona-question"><Sparkles size={13} /><span>{persona.primaryQuestions[0]}</span></div></div><div className="metric-grid"><MetricCard label="Audit readiness" value={`${liveMetrics?.readiness ?? 0}%`} delta={liveMetrics?.readinessDelta ?? "database"} detail="vs. last weekly baseline" icon={Gauge} tone="cyan" onOpen={openReadiness} /><MetricCard label="Open findings" value={scopedFindings.length} delta={`${scopedFindings.filter((finding) => finding.severity === "Major").length} major`} detail={`Scoped to ${activeAudit.id} · ${scopedFindings.length} unresolved`} icon={ShieldAlert} tone="red" trend="down" onOpen={openFindings} /><MetricCard label="Supplier exposure" value={liveMetrics?.supplierExposure ?? 0} delta="database" detail="linked to active changes" icon={Building2} tone="amber" onOpen={openSuppliers} /><MetricCard label="Changes · 30d" value={liveMetrics?.changes30d ?? 0} delta="database" detail="review state from domain store" icon={GitBranch} tone="blue" onOpen={openChanges} /></div>
-    <div className="overview-grid"><div className="overview-left"><ActiveAudit audit={activeAudit} onOpen={() => onNavigate("audit")} /><GenealogyPreview projection={projection} onOpen={() => onNavigate("graph")} onRun={() => {}} onOpenDrawer={onOpenDrawer} /></div><div className="overview-right"><TemporalTrace onRun={() => {}} /><FindingList findings={scopedFindings} onOpen={onOpenDrawer} /></div></div>
-  </>;
-}
-
-function AuditRow({ audit, onOpen }: { audit: AuditRecord; onOpen: () => void }) {
-  return <button className="audit-row" onClick={onOpen}><div className="audit-row-id">{audit.id}</div><div className="audit-row-main"><strong>{audit.title}</strong><small>{audit.standard} <span>·</span> {audit.scope}</small></div><div className="audit-row-progress"><span>{audit.progress}%</span><div className="progress-bar"><span style={{ width: `${audit.progress}%` }} /></div></div><Badge tone={audit.status === "Planned" ? "blue" : audit.status === "Ready for review" ? "green" : "amber"} subtle>{audit.status}</Badge><ChevronRight size={15} /></button>;
-}
-
-const priorReports = [{ id: "AUD-024", title: "Supplier oversight baseline review", date: "12 Feb 2026", status: "Closed with actions", readiness: "88%", activity: ["Supplier qualification sampled", "2 minor findings closed", "NEI-14-09 procedure mapping approved"] }, { id: "AUD-021", title: "Unit 2 material traceability audit", date: "18 Nov 2025", status: "Closed", readiness: "94%", activity: ["Heat-lot chain sampled", "Receiving records reconciled", "Baseline accepted by quality"] }, { id: "AUD-018", title: "Configuration change control review", date: "04 Aug 2025", status: "Closed with actions", readiness: "79%", activity: ["CHG-009 impact review", "Document revision gap found", "Corrective action verified"] }];
-
-function PriorReports({ onOpenDrawer }: { onOpenDrawer: (model: DrawerModel) => void }) {
-  const openActivity = (report: typeof priorReports[number], activityItem: string) => onOpenDrawer({ eyebrow: `REPORT ACTIVITY · ${report.id}`, title: activityItem, subtitle: "Activity opened from filed report", icon: Activity, content: <><div className="drawer-trace"><span>{report.id}</span><ChevronRight size={12} /><span>{activityItem}</span><ChevronRight size={12} /><span>Knowledge graph</span></div><p className="drawer-activity-copy">This activity is linked back to the filed report and can reopen the underlying audit context, evidence, finding, or change record in the production implementation.</p></> });
-  const openReport = (report: typeof priorReports[number]) => onOpenDrawer({ eyebrow: `FILED REPORT · ${report.id}`, title: report.title, subtitle: `${report.date} · ${report.status}`, icon: FileCheck2, content: <><div className="report-detail-kpis"><span><small>Readiness</small><strong>{report.readiness}</strong></span><span><small>Status</small><strong>{report.status}</strong></span><span><small>Graph context</small><strong>Linked</strong></span></div><div className="drawer-section"><span className="tiny-label">REPORT ACTIVITY</span><div className="report-activity-list">{report.activity.map((activityItem) => <div role="button" tabIndex={0} key={activityItem} onClick={() => openActivity(report, activityItem)} onKeyDown={(event) => { if (event.key === "Enter") openActivity(report, activityItem); }}><Activity size={12} />{activityItem}<ChevronRight size={12} /></div>)}</div></div><p className="drawer-activity-copy">Activities are linked to the filed report and can reopen the underlying audit context, evidence, finding, or change record in the production implementation.</p></> });
-  return <article className="panel prior-reports-panel"><div className="panel-head"><div><SectionKicker icon={History}>Filed audit reports</SectionKicker><h2>Compare prior posture to today</h2><p>Synthetic prior reports are linked to the same graph so gaps can be demonstrated over time.</p></div><Badge tone="blue">3 archived</Badge></div><div className="prior-report-list">{priorReports.map((report) => <button key={report.id} className="prior-report-row" onClick={() => openReport(report)}><span className="prior-report-id">{report.id}</span><span><strong>{report.title}</strong><small>{report.date} · {report.status}</small></span><b>{report.readiness}</b><ChevronRight size={14} /></button>)}</div></article>;
-}
-
-const documentRevisions = [{ id: "WI-118", title: "Receiving inspection work instruction", accepted: "Rev 3", current: "Rev 4", changed: "14 Apr 2026", actor: "R. Gomez", impact: "Heat-lot field moved without evidence mapping" }, { id: "PROC-21-04", title: "Part 21 evaluation procedure", accepted: "Rev 5", current: "Rev 6", changed: "02 Apr 2026", actor: "Quality systems", impact: "Responsible officer escalation language clarified" }, { id: "QAP-007", title: "Supplier quality requirements", accepted: "Rev 2", current: "Rev 2", changed: "18 Nov 2025", actor: "D. Novak", impact: "No post-acceptance changes" }];
-
-function DocumentRevisionHistory({ onOpenDrawer }: { onOpenDrawer: (model: DrawerModel) => void }) {
-  return <article className="panel revision-panel"><div className="panel-head"><div><SectionKicker icon={History}>Controlled document revisions</SectionKicker><h2>Show what changed after acceptance</h2><p>Version history keeps the accepted statement, current revision, actor, and impact visible.</p></div><Badge tone="amber">Change-aware</Badge></div><div className="revision-list">{documentRevisions.map((revision) => <button key={revision.id} className="revision-row" onClick={() => onOpenDrawer({ eyebrow: `DOCUMENT HISTORY · ${revision.id}`, title: revision.title, subtitle: `${revision.accepted} accepted → ${revision.current} current · changed ${revision.changed}`, icon: History, content: <><div className="revision-compare"><span><small>Accepted baseline</small><strong>{revision.accepted}</strong><em>Original approved statement</em></span><ArrowUpRight size={16} /><span className={revision.accepted === revision.current ? "same" : "changed"}><small>Current revision</small><strong>{revision.current}</strong><em>{revision.actor} · {revision.changed}</em></span></div><div className="drawer-section"><span className="tiny-label">IMPACT OF CHANGE</span><p>{revision.impact}</p></div><div className="drawer-section"><span className="tiny-label">REQUIRED CONTROL</span><p>Re-open the affected audit activity, compare the original statement with the new revision, assess evidence impact, and route the change through the human approval gate.</p></div></> })}><span className="revision-id">{revision.id}</span><span><strong>{revision.title}</strong><small>{revision.accepted} → {revision.current} · {revision.changed}</small></span><Badge tone={revision.accepted === revision.current ? "green" : "amber"} subtle>{revision.accepted === revision.current ? "Stable" : "Changed"}</Badge><ChevronRight size={14} /></button>)}</div></article>;
-}
-
-function ReportApprovalPanel({ onRun }: { onRun: (label: string) => void }) {
-  const [auditId, setAuditId] = useState("");
-  const [personaId, setPersonaId] = useState("quality");
-  const [people, setPeople] = useState<any[]>([]);
-  const [allowedRoleIds, setAllowedRoleIds] = useState<string[]>([]);
-  const [personId, setPersonId] = useState("");
-  const [task, setTask] = useState<any>(null);
-  const [note, setNote] = useState("Reviewed the evidence chain, finding disposition, and reportability basis.");
-  const [busy, setBusy] = useState(false);
-  const [result, setResult] = useState<any>(null);
-  useEffect(() => { fetch("/api/domain/audits").then((response) => response.json()).then((payload) => { const audit = (payload.audits ?? [])[0]; if (audit?.id) setAuditId(audit.id); }); fetch("/api/people").then((response) => response.json()).then((payload) => { const directory = payload.people ?? []; setPeople(directory); const first = directory.find((person: any) => person.roleId === "quality") ?? directory[0]; if (first) setPersonId(first.id); }); fetch("/api/approval-rules?decisionType=audit_report_finalization").then((response) => response.json()).then((payload) => { const roles = payload.rules?.[0]?.allowedRoleIds ?? []; setAllowedRoleIds(roles); }); }, []);
-  const route = async () => { if (!auditId) return; setBusy(true); const response = await fetch(`/api/reports/${encodeURIComponent(auditId)}/approval-route`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ personaId, personId, personName: people.find((person) => person.id === personId)?.name, personEmail: people.find((person) => person.id === personId)?.email, routedBy: "Lead auditor", note }) }); const payload = await response.json(); setTask(payload.task); setResult(null); setBusy(false); onRun(`${payload.task?.approvalId ?? "Report"} routed to ${payload.task?.target?.role ?? "qualified approver"}`); };
-  const approve = async () => { if (!task) return; setBusy(true); const response = await fetch(`/api/reports/approvals/${encodeURIComponent(task.approvalId)}/approve`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ actor: task.target.personName, note }) }); const payload = await response.json(); setResult(payload); setTask(payload.approval); setBusy(false); onRun(payload.ok ? `Report finalized · ${payload.finalization?.snapshotHash?.slice(0, 12)}… · graph promoted` : `Report approval blocked · ${payload.error}`); };
-  const persona = assurancePersonas.find((item: any) => item.id === personaId);
-  return <article className="panel report-approval-panel"><div className="panel-head"><div><SectionKicker icon={UserRoundCheck}>Role-routed final report</SectionKicker><h2>Route the report to the accountable approver</h2><p>The selected role receives the human gate. Approval stores the report, creates the immutable hash, promotes the approved graph state, and writes the event trail.</p></div><Badge tone={result?.ok ? "green" : "amber"}>{result?.ok ? "Finalized" : task?.status === "pending" ? "Pending approval" : "Human gate"}</Badge></div><div className="report-approval-controls"><label>Approver role<select value={personaId} onChange={(event) => { setPersonaId(event.target.value); const first = people.find((person) => person.roleId === event.target.value); if (first) setPersonId(first.id); }}>{assurancePersonas.filter((item: any) => allowedRoleIds.length === 0 || allowedRoleIds.includes(item.id)).map((item: any) => <option key={item.id} value={item.id}>{item.label} · {item.title}</option>)}</select></label><label>Approver person<select value={personId} onChange={(event) => setPersonId(event.target.value)}>{people.filter((person) => person.roleId === personaId).map((person) => <option key={person.id} value={person.id}>{person.name} · {person.title}</option>)}</select></label><label>Approval note<textarea value={note} onChange={(event) => setNote(event.target.value)} rows={2} /></label><div className="report-approval-actions"><button className="primary-button" onClick={route} disabled={busy || !auditId || !allowedRoleIds.includes(personaId)}><Workflow size={14} />Route report</button><button className="ghost-button" onClick={approve} disabled={busy || !task || task.status !== "pending"}><CheckCircle2 size={14} />Approve & promote graph</button></div></div>{persona && <div className="report-route-summary"><strong>{people.find((person) => person.id === personId)?.name ?? "Select a person"} · {persona.title}</strong><span>{persona.alertRule}</span><small>Focus: {persona.focus.join(" · ")}</small></div>}{task && <div className="report-approval-task"><span><b>{task.approvalId}</b> · {task.auditId}</span><span>Routed to {task.target.personName} · {task.target.role}</span><Badge tone={task.status === "approved" ? "green" : "amber"} subtle>{task.status}</Badge></div>}{result?.ok && <div className="report-finalization-result"><CheckCircle2 size={15} /><div><strong>Immutable report and graph promotion complete</strong><small>Report {result.finalization.reportId} · SHA-256 {result.finalization.snapshotHash}</small><small>Graph snapshot: {result.finalization.graphSnapshot?.snapshotId ?? "recorded"} · Event: {result.event?.id ?? "recorded"}</small><small>{result.lifecycle?.reportStatus} · {result.lifecycle?.hashStatus} · {result.lifecycle?.repositoryStatus} · {result.lifecycle?.graphStatus} · {result.lifecycle?.completionStatus}</small></div></div>}</article>;
-}
-
-function AuditView({ onRun, onOpenDrawer }: { onRun: (label: string) => void; onOpenDrawer: (model: DrawerModel) => void }) {
-  const downloadJson = async () => {
-    const response = await fetch("/api/reports/audit-readiness?auditId=AUD-026");
-    const blob = await response.blob();
-    const url = URL.createObjectURL(blob);
-    const anchor = document.createElement("a");
-    anchor.href = url;
-    anchor.download = "part21-aud-026-readiness.json";
-    anchor.click();
-    URL.revokeObjectURL(url);
-    onRun("Audit readiness JSON exported · AUD-026");
-  };
-  return <div className="view-stack"><div className="view-title-row"><div><SectionKicker icon={ClipboardCheck}>Audit workbench</SectionKicker><h1>Move from scope to evidence-backed conclusion.</h1><p>Three audit programs are in flight across configuration, suppliers, and corrective action.</p></div><div className="view-actions"><a className="ghost-button" href="/api/reports/audit-readiness.csv?auditId=AUD-026" download="part21-aud-026-readiness.csv" onClick={() => onRun("Audit readiness CSV exported · AUD-026")}><FileCheck2 size={14} />CSV</a><button className="ghost-button" onClick={downloadJson}><DatabaseZap size={14} />JSON</button><button className="ghost-button" onClick={() => window.print()}><FileSearch size={14} />Print / PDF</button><button className="primary-button" onClick={() => onOpenDrawer({ eyebrow: "NEW AUDIT", title: "Create an audit program", subtitle: "Scope, accountable owner, requirements, and risk lens", icon: ClipboardCheck, content: <div className="drawer-form"><label>Audit title<input defaultValue="Unit 2 traceability & configuration" /></label><label>Standard<select defaultValue="21.51"><option>21.51 records</option><option>21.21 evaluation</option><option>Supplier oversight</option></select></label><label>Risk rationale<textarea defaultValue="Recent supplier change and orphaned heat-lot evidence chain." /></label><button className="primary-button" onClick={() => onRun("Audit draft saved · awaiting scope confirmation")}><CheckCircle2 size={14} />Save audit draft</button></div> })}><ClipboardCheck size={15} />Start an audit</button></div></div><div className="report-ribbon"><div className="report-ribbon-icon"><FileCheck2 size={17} /></div><div><strong>Audit readiness report · AUD-026</strong><p>Common-format export includes executive position, readiness metrics, controls, findings, evidence, source freshness, agent recommendation, and explicit human decisions required.</p></div><Badge tone="amber">Ready with actions</Badge></div><ReportApprovalPanel onRun={onRun} /><div className="audit-view-grid"><article className="panel audit-list-panel"><div className="panel-head"><div><h2>Audit programs</h2><p>Owner, coverage, status, and finding context</p></div><button className="icon-button"><SlidersHorizontal size={15} /></button></div><div className="audit-list">{audits.map((audit) => <AuditRow key={audit.id} audit={audit} onOpen={() => onOpenDrawer({ eyebrow: `AUDIT PROGRAM · ${audit.id}`, title: audit.title, subtitle: `${audit.standard} · ${audit.scope}`, icon: ClipboardCheck, content: <><DrawerMetricSummary formula={`Evidence coverage = ${audit.evidence} · progress = ${audit.progress}%`} rows={[{ label: "Owner", value: audit.owner, detail: "Accountable audit lead" }, { label: "Due", value: audit.due, detail: "Current target date" }, { label: "Findings", value: String(audit.findings), detail: "Open items in audit scope" }, { label: "Evidence", value: audit.evidence, detail: "Linked / expected evidence" }]} footer="Open the audit skill flow to continue scope, evidence, traceability, findings, and closure" /><button className="full-button" onClick={() => onRun(`${audit.id} workbench opened · evidence workspace ready`)}>Continue this audit <ArrowUpRight size={14} /></button></> })} />)}</div></article><article className="panel audit-insight-panel"><SectionKicker icon={Sparkles}>Audit copilot</SectionKicker><h2>One evidence chain is blocking sign-off.</h2><p className="lead-copy">AUD-026 is 68% covered. The agent found a missing join between the receiving inspection and the heat-lot record. That same orphaned edge is referenced by F-042.</p><div className="insight-chain"><div><span>01</span><strong>Receiving inspection</strong><small>EV-803 · 71% confidence</small></div><ChevronRight size={16} /><div className="chain-risk"><span>02</span><strong>Heat-lot record</strong><small>Missing link · review due</small></div><ChevronRight size={16} /><div><span>03</span><strong>Baseline acceptance</strong><small>Blocked until resolved</small></div></div><div className="insight-actions"><button className="full-button" onClick={() => onOpenDrawer({ eyebrow: "EVIDENCE CHAIN · EV-803", title: "Receiving inspection → heat-lot → baseline", subtitle: "The missing join blocking AUD-026 sign-off", icon: Link2, content: <><div className="drawer-trace"><span>EV-803 receiving inspection</span><ChevronRight size={12} /><span className="trace-missing">Missing link</span><ChevronRight size={12} /><span>Heat-lot 7B-441</span><ChevronRight size={12} /><span>NSS-4820 baseline</span></div><div className="drawer-section"><span className="tiny-label">AGENT INSIGHT</span><p>The signal is not a failed inspection result. Confidence is weak because the supplier heat-lot certificate cannot be joined to the receiving record. Recommended action: request the certificate, verify lot identity, and re-run 21.51 evidence coverage.</p></div><div className="drawer-section"><span className="tiny-label">EVIDENCE TO REQUEST</span><div className="drawer-action"><FileUp size={14} /><strong>Heat-lot certificate + receiving reconciliation</strong><small>Tag both assets to FIND-2026-04 and AUD-026</small></div></div></> })}>Open evidence chain <ArrowUpRight size={14} /></button><button className="ghost-button" onClick={() => onOpenDrawer({ eyebrow: "FINDING DRAFT", title: "F-042 · Heat-lot chain unresolved", subtitle: "Generated from the evidence chain, with human edits required", icon: FileSearch, content: <><Badge tone="red">Major candidate</Badge><div className="drawer-section"><span className="tiny-label">DRAFT NARRATIVE</span><p>Receiving inspection EV-803 cannot currently be reconciled to the heat-lot certificate for NSS-4820. The evidence chain is incomplete for the affected baseline.</p></div><div className="drawer-section"><span className="tiny-label">REGULATORY BASIS</span><p>Traverse to §21.51 records, §21.21 evaluation, §21.61 failure to notify, and client-approved procedure mapping before disposition.</p></div><button className="full-button" onClick={() => onRun("Finding draft added to report · human review required")}>Add to report draft <FileCheck2 size={14} /></button></> })}>Draft finding <FileSearch size={14} /></button></div></article></div><PriorReports onOpenDrawer={onOpenDrawer} /><DocumentRevisionHistory onOpenDrawer={onOpenDrawer} /><div className="workbench-strip"><span><StatusDot tone="green" pulse />Evidence graph synced 3 minutes ago</span><span><Cpu size={14} />4 agent recommendations awaiting review</span><span><LockKeyhole size={14} />Human approval remains required</span></div></div>;
-}
-
-function GraphView({ onRun, onOpenDrawer, activeAudit }: { onRun: (label: string) => void; onOpenDrawer: (model: DrawerModel) => void; activeAudit: AuditRecord }) {
-  const [storedGraph, setStoredGraph] = useState<any>(null);
-  useEffect(() => { fetch(`/api/graph/context?findingId=${encodeURIComponent(activeAudit.id === "AUD-026" ? "FIND-2026-04" : activeAudit.id)}`).then((response) => response.json()).then(setStoredGraph).catch(() => undefined); }, [activeAudit.id]);
-  const fallbackProjection = getAuditGraphProjection(activeAudit.id);
-  const projection = storedGraph?.nodes?.length ? { nodes: storedGraph.nodes, edges: storedGraph.edges } : fallbackProjection;
-  const timeline: any[] = storedGraph?.temporalEvents?.length ? storedGraph.temporalEvents.map((event: any, index: number) => ({ id: `${event.entityId}-${index}`, date: String(event.validFrom ?? event.recordedAt ?? ""), title: `${event.operation} · ${event.entityId}`, actor: event.recordedBy, detail: JSON.stringify(event.payload ?? {}), type: event.operation === "approved" ? "approval" : event.operation === "created" ? "baseline" : "change", impact: "Database event in the active graph" })) : timelineEvents;
-  const [selectedId, setSelectedId] = useState(projection.nodes[0]?.id ?? "prod-4820");
-  const selected = projection.nodes.find((candidate: GraphNode) => candidate.id === selectedId) ?? projection.nodes[0];
-  return <div className="view-stack"><div className="view-title-row"><div><SectionKicker icon={Network}>Genealogy graph</SectionKicker><h1>See the links that make a conclusion defensible.</h1><p>Click through products, requirements, suppliers, changes, people, and evidence.</p></div><button className="primary-button" onClick={() => onRun("Graph query exported · 8 entities")}> <Link2 size={15} />Export trace</button></div><div className="graph-view-grid"><article className="panel graph-large-panel"><div className="panel-head"><div><h2>{activeAudit.title}</h2><p>Audit projection: {activeAudit.id} · {projection.nodes.length} entities · {projection.edges.length} relationships · Part 21 ontology · {part21Ontology.version}</p></div><div className="graph-toolbar"><Badge tone="cyan">Ontology mapped</Badge><button className="icon-button"><SlidersHorizontal size={15} /></button></div></div><GraphCanvas selectedId={selectedId} onSelect={setSelectedId} nodes={projection.nodes} edges={projection.edges} /></article><div className="graph-side"><SelectedNode node={selected} onRun={onRun} onOpen={onOpenDrawer} nodes={projection.nodes} edges={projection.edges} /><article className="panel graph-query-panel"><SectionKicker icon={Command}>Query context</SectionKicker><div className="query-line"><Search size={14} /><span>Show what changed for NSS-4820</span><kbd>⌘ K</kbd></div><div className="query-tags"><Badge tone="cyan" subtle>product</Badge><Badge tone="red" subtle>changes</Badge><Badge tone="amber" subtle>suppliers</Badge></div><button className="full-button" onClick={() => onRun("Natural-language graph query executed")}>Run agent query <Zap size={14} /></button></article></div></div><article className="panel timeline-wide"><div className="panel-head"><div><SectionKicker icon={History}>Temporal graph</SectionKicker><h2>State transition history</h2><p>Valid time + transaction time: reconstruct what was true, and what the system knew.</p></div><span className="timeline-range">2024 <ArrowUpRight size={13} /> 2026</span></div><div className="temporal-events-wide">{timeline.map((event) => <div className={`wide-event wide-${event.type}`} key={event.id}><div className="wide-event-dot" /><span>{event.date}</span><strong>{event.title}</strong><small>{event.actor}</small><p>{event.detail}</p></div>)}</div></article><div className="graph-ops-grid"><article className="panel schema-panel"><div className="panel-head"><div><SectionKicker icon={DatabaseZap}>Database graph schema</SectionKicker><h2>What the agent is reading</h2><p>Persistent tables behind the NSS-4820 knowledge graph.</p></div><Badge tone="green">{storedGraph?.source ?? "database-backed"}</Badge></div><div className="schema-list">{(storedGraph?.schema ?? [{ table: "part21_graph_nodes", purpose: "Ontology entities", fields: "id · node_type · label · status · payload" }, { table: "part21_graph_edges", purpose: "Typed relationships", fields: "from_id · to_id · relation · payload" }, { table: "part21_graph_events", purpose: "Bitemporal history", fields: "valid_from · recorded_at · recorded_by · operation" }]).map((item: any) => <div className="schema-row" key={item.table}><div><strong>{item.table}</strong><small>{item.purpose}</small></div><span>{item.fields}</span></div>)}</div></article><article className="panel reportability-panel"><div className="panel-head"><div><SectionKicker icon={ShieldAlert}>Part 21 reportability gate</SectionKicker><h2>Recommendation is not a decision</h2><p>The compliance agent can surface a reportability concern, but qualified reviewers control the conclusion.</p></div><Badge tone="amber">Human review required</Badge></div><div className="gate-steps"><div className="gate-step complete"><span>01</span><div><strong>Graph signal detected</strong><small>CHG-014 impacts EV-771 and the NSS-4820 trace chain.</small></div></div><div className="gate-step active"><span>02</span><div><strong>Agent recommends evidence checks</strong><small>Request receiving, heat-lot, implementation, and affected-item records.</small></div></div><div className="gate-step blocked"><span>03</span><div><strong>Qualified human review</strong><small>Quality, nuclear, legal, and compliance reviewers determine applicability/reportability.</small></div></div><div className="gate-step queued"><span>04</span><div><strong>Record decision and notarize</strong><small>Persist rationale, approvers, source evidence, and final decision hash.</small></div></div></div><button className="full-button" onClick={() => onRun("Reportability review packet opened · no final determination made")}><ShieldCheck size={14} />Open human review packet</button></article></div></div>;
-}
-
-function EvidenceView({ onRun, onOpenDrawer }: { onRun: (label: string) => void; onOpenDrawer: (model: DrawerModel) => void }) {
-  return <div className="view-stack"><div className="view-title-row"><div><SectionKicker icon={FileCheck2}>Evidence register</SectionKicker><h1>Every signal has a source, a freshness, and a confidence.</h1><p>Navigate the records behind agent recommendations and audit conclusions.</p></div><button className="primary-button" onClick={() => onRun("Evidence sync requested · 84,951 records")}> <RefreshCw size={15} />Sync sources</button></div><article className="panel table-panel"><div className="table-toolbar"><div className="table-search"><Search size={15} /><span>Search evidence, source, entity…</span></div><div className="table-actions"><Badge tone="cyan">84,951 indexed</Badge><button className="ghost-button"><SlidersHorizontal size={14} />Filters</button></div></div><div className="data-table"><div className="table-head"><span>Evidence</span><span>Type / source</span><span>Linked context</span><span>Freshness</span><span>Confidence</span><span>State</span></div>{evidence.map((item) => <button className="table-row" key={item.id} onClick={() => onOpenDrawer({ eyebrow: `EVIDENCE · ${item.id}`, title: item.title, subtitle: `${item.type} · ${item.source} · ${item.state}`, icon: FileCheck2, content: <><div className="drawer-chip-row"><Badge tone={item.state === "Current" ? "green" : "amber"}>{item.state}</Badge><Badge tone="cyan">Confidence {Math.round(item.confidence * 100)}%</Badge></div><div className="drawer-section"><span className="tiny-label">LINKED CONTEXT</span><div className="drawer-trace"><span>{item.id}</span><ChevronRight size={12} /><span>{item.linkedTo}</span><ChevronRight size={12} /><span>AUD-026 report</span></div></div><div className="drawer-section"><span className="tiny-label">PROVENANCE</span><p>Source: {item.source}. Freshness: {item.freshness}. This record is available to the agent, but any finding or report action still requires human review.</p></div><div className="drawer-section"><span className="tiny-label">NEXT ACTION</span><div className="drawer-action"><Link2 size={14} /><strong>Attach or reconcile this evidence</strong><small>Tag to the finding, report, and affected product baseline</small></div></div></> })}><span className="table-entity"><span className="table-icon"><FileCheck2 size={14} /></span><span><strong>{item.id}</strong><small>{item.title}</small></span></span><span><b>{item.type}</b><small>{item.source}</small></span><span className="linked-context"><Link2 size={12} />{item.linkedTo}</span><span>{item.freshness}</span><span className="confidence"><i><span style={{ width: `${item.confidence * 100}%` }} /></i>{Math.round(item.confidence * 100)}%</span><Badge tone={item.state === "Current" ? "green" : item.state === "Review due" ? "amber" : "blue"} subtle>{item.state}</Badge></button>)}</div></article><EvidenceTracePanel onRun={onRun} /><div className="evidence-callout"><div className="callout-icon"><Sparkles size={17} /></div><div><strong>Agent evidence note</strong><p>EV-803 is the only item below 80% confidence in the current audit chain. The weak confidence comes from a missing supplier heat-lot join, not from a failed test result.</p></div><button className="text-button" onClick={() => onRun("Evidence note copied to audit context")}>Add to audit <ChevronRight size={14} /></button></div></div>;
-}
-
-function ControlView({ onRun }: { onRun: (label: string) => void }) {
-  return <div className="view-stack"><div className="view-title-row"><div><SectionKicker icon={ShieldCheck}>Control coverage</SectionKicker><h1>Know which controls are healthy before the audit asks.</h1><p>Coverage is calculated from linked evidence, findings, and source freshness.</p></div><button className="primary-button" onClick={() => onRun("Control gap scan completed · 2 watch items")}> <Radar size={15} />Run gap scan</button></div><div className="control-grid">{controls.map((control) => <ControlCard key={control.id} control={control} onRun={onRun} />)}</div><article className="panel control-map"><div className="panel-head"><div><SectionKicker icon={Waypoints}>Coverage map</SectionKicker><h2>Where assurance is thin</h2><p>The biggest gap is the supplier-to-product change path.</p></div><Badge tone="amber">2 areas to watch</Badge></div><div className="coverage-map"><div className="coverage-axis"><span>100%</span><span>75%</span><span>50%</span><span>25%</span><span>0%</span></div>{controls.map((control) => <div className="coverage-row" key={control.id}><span>{control.id}</span><div className="coverage-track"><div style={{ width: `${control.coverage}%`, background: toneColor[control.status === "Healthy" ? "green" : control.status === "Gap" ? "red" : "amber"] }} /><i style={{ left: `${control.coverage}%` }} /></div><strong>{control.coverage}%</strong><small>{control.next}</small></div>)}</div></article></div>;
-}
-
-function ControlCard({ control, onRun }: { control: ControlRecord; onRun: (label: string) => void }) {
-  const tone = control.status === "Healthy" ? "green" : control.status === "Gap" ? "red" : "amber";
-  return <button className="control-card" onClick={() => onRun(`${control.id} opened · ${control.next}`)}><div className="control-card-head"><span className="control-id">{control.id}</span><Badge tone={tone} subtle>{control.status}</Badge></div><strong>{control.title}</strong><small>{control.family}</small><div className="control-meter"><div><span style={{ width: `${control.coverage}%`, background: toneColor[tone] }} /></div><b>{control.coverage}%</b></div><p><StatusDot tone={tone} />{control.signal}</p><span className="control-next">Next: {control.next}<ChevronRight size={13} /></span></button>;
-}
-
-function SimulationPanel({ simulation, selectedPhase, onSelectPhase }: { simulation: { finding: Record<string, unknown>; status: "completed"; steps: SimulationStep[] }; selectedPhase: number; onSelectPhase: (phase: number) => void }) {
-  const step = simulation.steps.find((item) => item.phase === selectedPhase) ?? simulation.steps[0];
-  return <article className="panel simulation-panel"><div className="panel-head"><div><SectionKicker icon={Play}>Full AgentKit execution</SectionKicker><h2>{String(simulation.finding.id ?? "Database finding")} · {String(simulation.finding.title ?? "")}</h2><p>Completed simulation · exact tool calls, connector provenance, and human gates</p></div><Badge tone="green">5 / 5 completed</Badge></div><div className="simulation-layout"><div className="simulation-steps">{simulation.steps.map((item) => <button key={item.phase} className={`simulation-step ${selectedPhase === item.phase ? "active" : ""}`} onClick={() => onSelectPhase(item.phase)}><span className="simulation-step-number"><Check size={12} /></span><span><strong>{item.phase}. {item.phaseLabel}</strong><small>{item.agent} · {item.toolCalls.length} tool calls</small></span><Badge tone={item.humanGate.decision === "Approved" ? "green" : "amber"} subtle>{item.humanGate.decision}</Badge></button>)}</div><div className="simulation-detail"><div className="simulation-detail-head"><div><span className="tiny-label">PHASE {step.phase} · {step.route}</span><strong>{step.agent}</strong></div><span className="gate-approved"><CheckCircle2 size={14} />{step.humanGate.gate}</span></div><div className="tool-call-list">{step.toolCalls.map((call) => <div className="tool-call" key={call.sequence}><div className="tool-call-head"><span>#{call.sequence}</span><strong>{call.tool}</strong><Badge tone={call.connector.includes("vendor") ? "amber" : call.connector.includes("document") ? "blue" : "cyan"} subtle>{call.connector}</Badge></div><pre>{JSON.stringify(call.arguments, null, 2)}</pre><div className="tool-result"><CheckCircle2 size={12} /><span>{call.result}</span></div><small>{call.provenance}</small></div>)}</div><div className="human-approval"><div className="approval-icon"><UserRoundCheck size={15} /></div><div><span className="tiny-label">HUMAN GATE APPROVAL</span><strong>{step.humanGate.approver} · {step.humanGate.decision}</strong><p>{step.humanGate.rationale}</p><small>{step.humanGate.timestamp}</small></div></div></div></div></article>;
-}
-
-function VoiceNoteButton({ onTranscript }: { onTranscript: (text: string) => void }) {
-  const [listening, setListening] = useState(false);
-  const start = () => { const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition; if (!SpeechRecognition) return; const recognition = new SpeechRecognition(); recognition.lang = "en-US"; recognition.interimResults = false; recognition.onstart = () => setListening(true); recognition.onend = () => setListening(false); recognition.onerror = () => setListening(false); recognition.onresult = (event: any) => onTranscript(event.results?.[0]?.[0]?.transcript ?? ""); recognition.start(); };
-  return <button type="button" className={`voice-note-button ${listening ? "listening" : ""}`} onClick={start} title={listening ? "Listening…" : "Dictate an answer"}><Radio size={12} />{listening ? "Listening…" : "Dictate"}</button>;
-}
-
-function SkillLibrary({ onRun, onUseSkill }: { onRun: (label: string) => void; onUseSkill?: (phase: AuditSkillPhase) => void }) {
-  const librarySkills = auditSkills;
-  const [selectedId, setSelectedId] = useState(auditSkills[0].id);
-  const selected = librarySkills.find((skill) => skill.id === selectedId) ?? librarySkills[0];
-  const agent = agentKitAgents.find((item) => item.id === selected.agent);
-  const [eccLibrary, setEccLibrary] = useState<any>(null);
-  useEffect(() => { fetch("/api/ecc/library").then((response) => response.json()).then(setEccLibrary); }, []);
-  return <section className="skill-library"><div className="skill-library-head"><div><span className="tiny-label">SKILL LIBRARY · ECC-COMPATIBLE CATALOG</span><h2>Reusable assurance skills</h2><p>Each skill combines domain backdrop, questions, evidence expectations, an AgentKit route, and an explicit human gate.</p><div className="ecc-source-line"><span><CircleCheck size={12} />Patterned after {eccCatalog.name} {eccCatalog.version}</span><a href={eccCatalog.repository} target="_blank" rel="noreferrer">View upstream ECC <ArrowUpRight size={12} /></a><a className="ecc-launch-link" href="/ecc/" target="_blank" rel="noreferrer"><Play size={11} />Open embedded ECC dashboard</a><span>Local pack: {eccCatalog.localPack}</span></div><div className="ecc-embedded-strip"><span className="tiny-label">EMBEDDED ECC MODULE · {embeddedEccModule.moduleId}</span>{embeddedEccModule.components.map((component) => <span key={component.id} className={`ecc-component ${component.status}`}><CircleCheck size={10} />{component.label}</span>)}</div>{eccLibrary && <div className="ecc-vendored-inventory"><span className="tiny-label">VENDORED ECC SOURCE · {eccLibrary.version}</span><span>{eccLibrary.counts.agents} agents</span><span>{eccLibrary.counts.skills} upstream skills</span><span>{eccLibrary.counts.commands} commands</span><span>{eccLibrary.counts.hooks} hooks</span><span className="ecc-source-badge">{eccLibrary.license} · local source</span></div>}</div><Badge tone="cyan">{librarySkills.length} configured skills</Badge></div><div className="skill-library-layout"><div className="skill-card-grid">{librarySkills.map((skill) => <button key={skill.id} className={`skill-card ${skill.id === selectedId ? "active" : ""}`} onClick={() => setSelectedId(skill.id)}><div className="skill-card-top"><span className="skill-card-icon"><Workflow size={14} /></span><Badge tone={skill.phase === "findings" ? "red" : skill.phase === "closure" ? "green" : "blue"} subtle>{skill.phase}</Badge></div><strong>{skill.name}</strong><p>{skill.purpose}</p><div className="skill-card-footer"><span>{skill.skillContract}</span><ChevronRight size={13} /></div></button>)}</div><div className="skill-detail"><div className="skill-detail-head"><div><span className="tiny-label">SELECTED SKILL · {selected.skillContract}</span><h3>{selected.name}</h3><p>{selected.purpose}</p></div><button className="primary-button" onClick={() => { onUseSkill?.(selected.phase); onRun(`${selected.name} loaded into guided flow`); }}><Play size={13} />Use skill</button></div><div className="skill-detail-grid"><div><span className="tiny-label">BACKDROP & QUESTIONS</span><div className="skill-question-index">{selected.questions.map((question: any, index: number) => <div key={question.id}><span>0{index + 1}</span><strong>{question.prompt}</strong><small>{question.evidenceHint}</small></div>)}</div></div><div><span className="tiny-label">EXECUTION CONTRACT</span><div className="ecc-contract-card"><div><span>Evidence</span><strong>{selected.questions.length} required prompts</strong></div><div><span>Agent route</span><strong>{selected.route}</strong></div><div><span>Human gate</span><strong>{selected.humanGate}</strong></div><div><span>Completion</span><strong>{selected.completionSignal}</strong></div></div><span className="tiny-label">TOOLS THIS SKILL CAN CALL</span><div className="skill-tool-chips">{(agent?.tools ?? []).map((tool: any) => <Badge key={tool} tone="cyan" subtle>{tool}</Badge>)}</div><span className="tiny-label">AGENT MAP</span><div className="agent-map-route"><span className="agent-map-node">Employee input</span><ChevronRight size={13} /><span className="agent-map-node active">{agent?.name ?? selected.agent}</span><ChevronRight size={13} /><span className="agent-map-node">{selected.skillContract}</span><ChevronRight size={13} /><span className="agent-map-node gate">Human gate</span></div><button className="text-button" onClick={() => onRun(`Agent map inspected · ${selected.route}`)}>Inspect AgentKit route <ArrowUpRight size={13} /></button></div></div></div></div></section>;
-}
-
-const part21PertNodes = [
-  { id: "application", label: "Part 21 application", progress: 100, status: "complete", phase: "Preparation", skill: "frame-scope", skillPhase: "scope" as AuditSkillPhase, agent: "scope-framer", detail: "Confirm the Part 21 trigger, affected facility/product, accountable organization, and audit boundary." },
-  { id: "readiness", label: "Readiness assessment", progress: 82, status: "complete", phase: "Preparation", skill: "readiness-check", skillPhase: "scope" as AuditSkillPhase, agent: "readiness-facilitator", detail: "Establish whether the organization has the records, roles, procedures, and source data to begin a defensible review." },
-  { id: "review", label: "Readiness review", progress: 25, status: "blocked", phase: "Preparation", skill: "evidence-intake", skillPhase: "evidence" as AuditSkillPhase, agent: "evidence-curator", detail: "Resolve missing or low-confidence evidence before the team treats readiness as complete." },
-  { id: "team", label: "Team assembly", progress: 60, status: "active", phase: "Execution", skill: "role-mapping", skillPhase: "scope" as AuditSkillPhase, agent: "scope-framer", detail: "Confirm the accountable roles, delegated reviewers, supplier contacts, and human approval gates." },
-  { id: "planning", label: "Audit planning", progress: 100, status: "complete", phase: "Execution", skill: "frame-scope", skillPhase: "scope" as AuditSkillPhase, agent: "scope-framer", detail: "Freeze scope, standards, sampling plan, evidence requests, and decision criteria." },
-  { id: "site", label: "Site audit execution", progress: 50, status: "active", phase: "Execution", skill: "genealogy-trace", skillPhase: "evidence" as AuditSkillPhase, agent: "genealogy-navigator", detail: "Walk the site, trace product and material genealogy, and compare observed conditions with controlled evidence." },
-  { id: "findings", label: "Findings review", progress: 30, status: "blocked", phase: "Execution", skill: "finding-challenge", skillPhase: "findings" as AuditSkillPhase, agent: "finding-challenger", detail: "Challenge each potential finding, test counterevidence, map the Part 21 basis, and set a provisional severity." },
-  { id: "corrective", label: "Corrective actions", progress: 20, status: "blocked", phase: "Execution", skill: "remediation-plan", skillPhase: "closure" as AuditSkillPhase, agent: "remediation-planner", detail: "Define containment, root cause, corrective action, owner, due date, and effectiveness evidence." },
-  { id: "quality", label: "Quality check", progress: 0, status: "queued", phase: "Closure", skill: "quality-gate", skillPhase: "closure" as AuditSkillPhase, agent: "closure-verifier", detail: "Verify that the evidence chain, Part 21 policy evaluation, decision record, and approvals are complete." },
-  { id: "report", label: "Final report preparation", progress: 10, status: "blocked", phase: "Closure", skill: "report-draft", skillPhase: "closure" as AuditSkillPhase, agent: "closure-verifier", detail: "Assemble a report draft from approved findings, evidence links, recommendations, and the human decision ledger." },
-  { id: "submission", label: "Final submission", progress: 0, status: "queued", phase: "Closure", skill: "human-review", skillPhase: "closure" as AuditSkillPhase, agent: "closure-verifier", detail: "Route the final package through authorized quality, legal, regulatory, and management approval." },
-  { id: "complete", label: "Part 21 audit complete", progress: 0, status: "queued", phase: "Closure", skill: "human-review", skillPhase: "closure" as AuditSkillPhase, agent: "closure-verifier", detail: "Close only after the qualified decision, retention record, report, and any notification disposition are filed." }
-];
-
-function Part21PERTMap({ onRun, onSelectSkill }: { onRun: (label: string) => void; onSelectSkill: (phase: AuditSkillPhase) => void }) {
-  const [selectedId, setSelectedId] = useState("readiness");
-  const selected = part21PertNodes.find((node) => node.id === selectedId) ?? part21PertNodes[0];
-  const rows: Array<[string, typeof part21PertNodes]> = [["Preparation", part21PertNodes.slice(0, 4)], ["Execution", part21PertNodes.slice(4, 8)], ["Closure", part21PertNodes.slice(8)]];
-  return <section className="part21-pert-panel"><div className="part21-pert-head"><div><span className="tiny-label">PART 21 AUDIT APPLICATION · KNOWLEDGE GRAPH PERT</span><h2>Follow the compliance agent through the audit</h2><p>Click any node to open its detail, see the skill applied, and load that activity into the guided flow. Dashed paths represent rework or escalation back to evidence and findings.</p></div><div className="pert-status-legend"><span><i className="legend-dot complete" />100% / complete</span><span><i className="legend-dot active" />1–99% / active</span><span><i className="legend-dot blocked" />blocked / missing input</span></div></div><div className="part21-pert-canvas"><svg className="pert-graph-lines" viewBox="0 0 1200 460" preserveAspectRatio="none" aria-hidden="true"><path d="M150 230 H225 V110 H300" /><path d="M390 110 H500 V230 H610" /><path d="M700 230 H805 V110 H900" /><path d="M700 230 H805 V350 H900" /><path d="M985 110 H1080 V230 H1160" /><path d="M985 350 H1080 V230 H1160" strokeDasharray="7 6" /><path d="M810 110 C760 80 720 80 680 110" strokeDasharray="7 6" /><path d="M900 350 C820 405 720 405 650 350" strokeDasharray="7 6" /></svg>{rows.map(([phase, nodes]) => <div className={`pert-phase-row pert-phase-${String(phase).toLowerCase()}`} key={phase}><div className="pert-phase-label">{phase}</div><div className="pert-node-row">{(nodes as typeof part21PertNodes).map((node) => <button key={node.id} className={`part21-pert-node ${node.status} ${selected.id === node.id ? "selected" : ""}`} onClick={() => setSelectedId(node.id)}><span className="part21-node-top"><span className="part21-node-status" />{node.progress}%</span><strong>{node.label}</strong><small>{node.skill}</small><span className="part21-node-agent"><Bot size={10} />{node.agent}</span></button>)}</div></div>)}</div><div className="pert-selected-detail"><div><span className="tiny-label">SELECTED NODE · {selected.phase.toUpperCase()}</span><h3>{selected.label}</h3><p>{selected.detail}</p></div><div className="pert-selected-skill"><span className="tiny-label">SKILL APPLIED</span><strong>{selected.skill}</strong><small>{selected.agent} · {selected.progress}% · {selected.status}</small><button className="primary-button" onClick={() => { onSelectSkill(selected.skillPhase); onRun(`${selected.label} skill loaded · ${selected.agent} watching`); }}><Workflow size={13} />Open guided skill</button></div></div></section>;
-}
-
-function SkillsView({ onRun }: { onRun: (label: string) => void }) {
-  const [phase, setPhase] = useState<AuditSkillPhase>("scope");
-  const [answers, setAnswers] = useState<Record<string, string>>(() => { try { return JSON.parse(localStorage.getItem("part21-audit-draft") ?? "{}").answers ?? {}; } catch { return {}; } });
-  const [draftSavedAt, setDraftSavedAt] = useState<string | null>(null);
-  useEffect(() => { localStorage.setItem("part21-audit-draft", JSON.stringify({ phase, answers, savedAt: new Date().toISOString() })); setDraftSavedAt(new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })); }, [answers, phase]);
-  const [runResult, setRunResult] = useState<{ status: string; completion: number; recommendation: string } | null>(null);
-  const [complianceFollowUp, setComplianceFollowUp] = useState<any>(null);
-  const [checkingAnswer, setCheckingAnswer] = useState(false);
-  const [acknowledgedWarnings, setAcknowledgedWarnings] = useState<Record<string, any>>({});
-  const [simulation, setSimulation] = useState<{ finding: Record<string, unknown>; status: "completed"; steps: SimulationStep[] } | null>(null);
-  const [selectedSimulationPhase, setSelectedSimulationPhase] = useState(1);
-  const skill = auditSkills.find((item) => item.phase === phase) ?? auditSkills[0];
-  const phaseIndex = auditPhases.findIndex((item) => item.id === phase);
-  const setAnswer = (id: string, value: string) => setAnswers((current) => ({ ...current, [id]: value }));
-  const runSkill = async () => {
-    const response = await fetch("/api/agentkit/run", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ skillId: skill.id, answers }) });
-    const result = await response.json();
-    setRunResult(result);
-    onRun(`${skill.name} routed through AgentKit · ${result.status}`);
-  };
-  const askComplianceAgent = async (questionId: string, prompt: string, answer: string) => {
-    if (!answer.trim()) return;
-    setCheckingAnswer(true);
-    const result = await fetch("/api/ai/ask", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ mode: "live", question: `Audit phase ${phase}. Prompt: ${prompt}. Employee answer: ${answer}. Act as a compliance agent. Identify one overlooked consideration and ask one useful follow-up question.` }) }).then((response) => response.json());
-    setComplianceFollowUp({ questionId, result });
-    setCheckingAnswer(false);
-    onRun(`Compliance agent checked answer · ${result.appliedSkill} · follow-up ready`);
-  };
-  const acknowledgeWarning = async (warning: any) => {
-    const rationale = window.prompt("Acknowledge reason (this does not make a reportability determination):", "I reviewed the warning and will route it to qualified Part 21 reviewers.");
-    if (!rationale) return;
-    const result = await fetch(`/api/ai/warnings/${warning.id}/acknowledge`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ traceId: warning.traceId, actor: "Jordan Lewis", rationale }) }).then((response) => response.json());
-    if (result.ok) { setAcknowledgedWarnings((current) => ({ ...current, [warning.id]: result.event })); onRun(`Warning ${warning.id} acknowledged · trace persisted`); }
-  };
-  const simulateFullFlow = async () => {
-    const response = await fetch("/api/agentkit/simulate", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({}) });
-    const result = await response.json();
-    setSimulation(result);
-    setSelectedSimulationPhase(1);
-    onRun("Full AgentKit execution completed · 5 human gates recorded");
-  };
-  const advance = () => {
-    const next = auditPhases[phaseIndex + 1];
-    if (next) { setPhase(next.id); setRunResult(null); onRun(`Moved to ${next.label}`); }
-  };
-  return <div className="view-stack"><div className="view-title-row"><div><SectionKicker icon={Workflow}>Audit skills</SectionKicker><h1>Guide the employee. Keep the agent accountable.</h1><p>Config-driven skills ask the right questions at each audit phase, then route context through the ECC-compatible skill module and an explicit human gate.</p></div><div className="view-actions"><Badge tone="cyan">ECC skill module</Badge><button className="primary-button" onClick={simulateFullFlow}><Play size={14} />Simulate FIND-2026-04</button></div></div><Part21PERTMap onRun={onRun} onSelectSkill={(nextPhase) => { setPhase(nextPhase); setRunResult(null); }} /><SkillLibrary onRun={onRun} onUseSkill={(nextPhase) => { setPhase(nextPhase); setRunResult(null); }} /><div className="skills-layout"><aside className="skill-phase-rail"><div className="skill-rail-label">AUDIT JOURNEY</div>{auditPhases.map((item: any, index: number) => <button key={item.id} className={`skill-phase ${phase === item.id ? "active" : ""} ${index < phaseIndex ? "complete" : ""}`} onClick={() => { setPhase(item.id); setRunResult(null); }}><span className="skill-phase-number">{index < phaseIndex ? <Check size={12} /> : index + 1}</span><span><strong>{item.short}</strong><small>{item.description}</small></span><ChevronRight size={14} /></button>)}<div className="skill-rail-contract"><span className="tiny-label">LOCAL SKILL CONTRACT</span><strong>Evidence · route · human gate</strong><p>Every local skill keeps its evidence basis, AgentKit route, and human decision gate together.</p></div></aside><section className="skill-workspace"><div className="skill-applied-ribbon"><Workflow size={13} /><span><small>SKILL CURRENTLY APPLIED</small><strong>{skill.name}</strong></span><span className="skill-applied-route">{skill.route}</span><Badge tone="cyan" subtle>{skill.humanGate}</Badge></div><div className="skill-workspace-head"><div><div className="skill-route"><span>{skill.route}</span><Badge tone="blue" subtle>{skill.skillContract}</Badge></div><h2>{skill.name}</h2><p>{skill.purpose}</p></div><div className="skill-agent-chip"><Bot size={15} /><span><small>AGENTKIT AGENT</small><strong>{skill.agent}</strong></span></div></div><div className="skill-gate"><ShieldCheck size={15} /><span><b>Human gate:</b> {skill.humanGate}</span></div><div className="skill-question-list">{skill.questions.map((question: any, index: number) => <div className="skill-question" key={question.id}><div className="skill-question-number">0{index + 1}</div><div className="skill-question-body"><label htmlFor={question.id}>{question.prompt}{question.required && <em>required</em>}</label><p>{question.helper}</p>{question.input === "choice" && <select id={question.id} value={answers[question.id] ?? ""} onChange={(event) => setAnswer(question.id, event.target.value)}><option value="">Select an answer…</option>{question.options?.map((option: string) => <option key={option} value={option}>{option}</option>)}</select>}{question.input === "checklist" && <div className="skill-checklist">{question.options?.map((option: string) => { const selected = (answers[question.id] ?? "").split("|").includes(option); return <label key={option} className={selected ? "checked" : ""}><input type="checkbox" checked={selected} onChange={() => { const values = (answers[question.id] ?? "").split("|").filter(Boolean); setAnswer(question.id, selected ? values.filter((value) => value !== option).join("|") : [...values, option].join("|")); }} /><span>{selected ? <Check size={11} /> : null}</span>{option}</label>; })}</div>}{question.input === "text" && <><textarea id={question.id} rows={2} value={answers[question.id] ?? ""} onChange={(event) => setAnswer(question.id, event.target.value)} placeholder="Capture the employee’s answer or point to a record…" /><VoiceNoteButton onTranscript={(text) => setAnswer(question.id, `${answers[question.id] ?? ""} ${text}`.trim())} /></>}<div className="skill-evidence-hint"><Link2 size={12} />{question.evidenceHint}</div><button className="agent-followup-button" type="button" disabled={checkingAnswer || !(answers[question.id] ?? "").trim()} onClick={() => askComplianceAgent(question.id, question.prompt, answers[question.id] ?? "")}><Bot size={12} />{checkingAnswer ? "Compliance agent is checking…" : "Ask compliance agent: what did I miss?"}</button>{complianceFollowUp?.questionId === question.id && <div className="compliance-followup"><div><span className="tiny-label">ACTIVE COMPLIANCE AGENT · {complianceFollowUp.result?.skillInvocation?.name ?? complianceFollowUp.result?.appliedSkill}</span><strong>{complianceFollowUp.result?.answer}</strong></div><div className="followup-questions">{(complianceFollowUp.result?.followUpQuestions ?? []).slice(0, 2).map((followUp: string) => <button key={followUp} onClick={() => askComplianceAgent(question.id, followUp, answers[question.id] ?? "")}>{followUp}<ChevronRight size={12} /></button>)}</div>{complianceFollowUp.result?.warning && <div className="compliance-warning"><div className="warning-head"><div><span className="tiny-label">WARNING · {complianceFollowUp.result.warning.code}</span><strong>{complianceFollowUp.result.warning.title}</strong></div><Badge tone="red">{complianceFollowUp.result.warning.severity}</Badge></div><p>{complianceFollowUp.result.warning.detail}</p><div className="warning-trace"><span>Trace {complianceFollowUp.result.warning.traceId}</span><span>Basis: {complianceFollowUp.result.warning.basis.join(" · ")}</span><span>Graph facts + evidence linked</span></div>{acknowledgedWarnings[complianceFollowUp.result.warning.id] ? <div className="warning-acknowledged"><CheckCircle2 size={13} />Acknowledged by {acknowledgedWarnings[complianceFollowUp.result.warning.id].actor} · persisted to assurance event ledger</div> : <button className="warning-ack-button" onClick={() => acknowledgeWarning(complianceFollowUp.result.warning)}><ShieldCheck size={13} />Acknowledge and route to human review</button>}</div>}<small>{complianceFollowUp.result?.llmInvoked ? `Live LLM invoked · ${complianceFollowUp.result?.model ?? "managed model"}` : `Grounded fallback · ${complianceFollowUp.result?.liveError ?? "LLM not invoked"}`} · grounded in the synthetic graph, temporal history, and Part 21 source pack · human review required.</small></div>}</div></div>)}</div><div className="skill-workspace-foot"><span><CircleDashed size={14} />{skill.completionSignal}{draftSavedAt && <small className="draft-saved">Saved {draftSavedAt}</small>}</span><div><button className="ghost-button" onClick={() => { setAnswers({}); setRunResult(null); onRun("Skill answers reset"); }}>Reset</button><button className="primary-button" onClick={runSkill}><Sparkles size={14} />Run {skill.agent}</button>{phaseIndex < auditPhases.length - 1 && <button className="ghost-button" onClick={advance}>Next phase <ChevronRight size={14} /></button>}</div></div>{runResult && <div className={`skill-run-result ${runResult.status === "ready_for_human_gate" ? "ready" : "needs"}`}><div><StatusDot tone={runResult.status === "ready_for_human_gate" ? "green" : "amber"} pulse /><strong>{runResult.status === "ready_for_human_gate" ? "Ready for human gate" : "Needs more context"}</strong><span>{runResult.completion}% complete</span></div><p>{runResult.recommendation}</p></div>}</section></div>{simulation && <SimulationPanel simulation={simulation} selectedPhase={selectedSimulationPhase} onSelectPhase={setSelectedSimulationPhase} />}<div className="agentkit-strip"><div><span className="tiny-label">AGENTKIT ROUTING</span><strong>{skill.route}</strong><p>Tools are selected from the shared skill definition and can be replaced by real AgentKit execution later.</p></div><div className="agentkit-tools"><Badge tone="cyan" subtle>search_entities</Badge><Badge tone="blue" subtle>trace_product_genealogy</Badge><Badge tone="amber" subtle>human_review</Badge></div></div></div>;
-}
-
-function DataView({ onRun, connected }: { onRun: (label: string) => void; connected: boolean }) {
-  const [graphStatus, setGraphStatus] = useState<any>(null);
-  useEffect(() => { fetch("/api/graph/store/status").then((response) => response.json()).then(setGraphStatus); }, []);
-  const syncGraph = async () => { const result = await fetch("/api/graph/store/sync", { method: "POST" }).then((response) => response.json()); setGraphStatus(result); onRun(`${result.source ?? "Graph store"} synchronized · ${result.insertedNodes ?? 0} nodes · ${result.insertedEdges ?? 0} edges`); };
-  return <div className="view-stack"><div className="view-title-row"><div><SectionKicker icon={DatabaseZap}>Data plane & MCP</SectionKicker><h1>One callable surface for every assurance signal.</h1><p>Synthetic adapters today; client-owned systems can replace each source without changing the graph contract.</p></div><Badge tone={connected ? "green" : "amber"}>{connected ? "MCP surface connected" : "Local demo surface"}</Badge></div><div className="data-view-grid"><article className="panel source-panel"><div className="panel-head"><div><h2>Connected sources</h2><p>Freshness and adapter state</p></div><button className="icon-button" onClick={() => onRun("Source health refreshed")}> <RefreshCw size={15} /></button></div><div className="source-list">{sources.map((source) => <div className="source-row" key={source.name}><div className="source-icon"><ServerCog size={15} /></div><div className="source-copy"><strong>{source.name}</strong><small>{source.kind} <span>·</span> {source.records} records</small></div><div className="source-freshness"><span><StatusDot tone={source.status === "Healthy" ? "green" : source.status === "Watch" ? "amber" : "blue"} />{source.status}</span><small>{source.freshness}</small></div><ChevronRight size={14} /></div>)}</div><div className="synthetic-note"><TriangleAlert size={14} /><span>Synthetic seed records are persisted in the configured graph database for this demonstration. External client systems remain connector boundaries until configured.</span></div></article><article className="panel mcp-panel"><div className="panel-head"><div><SectionKicker icon={Workflow}>MCP-style tool catalog</SectionKicker><h2>Callable assurance tools</h2><p>Typed, explainable actions for future agents and integrations.</p></div><Badge tone="cyan">{mcpTools.length} tools</Badge></div><div className="tool-list">{mcpTools.map((tool: any) => <button className="tool-row" key={tool.name} onClick={() => onRun(`${tool.name} executed · synthetic response ready`)}><div className="tool-name"><span className="tool-mark"><Command size={12} /></span><strong>{tool.name}</strong><small>{tool.group}</small></div><p>{tool.description}</p><ArrowUpRight size={14} /></button>)}</div></article></div><div className="connector-strip"><div className="connector-strip-head"><div><span className="tiny-label">EXTERNAL MCP CONNECTORS</span><strong>Client-owned systems, same graph contract</strong></div><Badge tone="blue">{mcpConnectors.length} adapters</Badge></div><div className="connector-cards">{mcpConnectors.map((connector) => <div className="connector-card" key={connector.id}><div className="connector-card-head"><span className="connector-icon"><ServerCog size={14} /></span><div><strong>{connector.name}</strong><small>{connector.transport} · {connector.auth}</small></div><StatusDot tone="green" pulse /></div><div className="connector-data">{connector.dataClasses.map((item: string) => <Badge tone={connector.category === "vendor-erp" ? "amber" : "blue"} subtle key={item}>{item}</Badge>)}</div><div className="connector-tools">{connector.tools.map((tool: any) => <span key={tool.name}><Command size={11} />{tool.name}</span>)}</div></div>)}</div></div><div className="storage-strip"><div className="storage-icon"><DatabaseZap size={15} /></div><div><span className="tiny-label">KNOWLEDGE GRAPH SOURCE OF TRUTH</span><strong>{graphStatus?.source ?? "Checking database graph…"}</strong><p>Nodes, edges, and temporal events used by live grounded LLM calls are read from the database graph projection. Seed synchronization is insert-only so imported changes are not overwritten.</p><small>{graphStatus?.tables?.join(" · ") ?? "part21_graph_nodes · part21_graph_edges · part21_graph_events"}</small></div><button className="ghost-button" onClick={syncGraph}><RefreshCw size={13} />Sync graph seed</button></div><div className="api-contract"><div><span className="tiny-label">Integration boundary</span><strong>/api/mcp/call</strong><p>POST a tool name and arguments; the response preserves source provenance, graph relationships, and human-review state.</p></div><div className="contract-code"><span><i>tool</i> trace_product_genealogy</span><span><i>productId</i> NSS-4820</span><span><i>mode</i> synthetic → replaceable adapter</span></div></div></div>;
-}
-
-function downloadJson(filename: string, payload: unknown) {
-  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
-  const url = URL.createObjectURL(blob);
-  const anchor = document.createElement("a");
-  anchor.href = url; anchor.download = filename; anchor.click(); URL.revokeObjectURL(url);
-}
-
-function FieldKanbanPanel({ onRun }: { onRun: (label: string) => void }) {
-  const [auditId, setAuditId] = useState("");
-  const [items, setItems] = useState<any[]>([]);
-  const [selected, setSelected] = useState<any>(null);
-  const [title, setTitle] = useState("");
-  const [transcript, setTranscript] = useState("");
-  const [note, setNote] = useState("");
-  const stages = [
-    { id: "backlog", label: "Backlog", sublabel: "Worth holding" },
-    { id: "in_progress", label: "Being made real", sublabel: "Agent + human in motion" },
-    { id: "blocked", label: "Ready to shape", sublabel: "Needs a decision" },
-    { id: "review", label: "Human review", sublabel: "Decide what moves" },
-    { id: "final", label: "Done", sublabel: "Still traceable" },
-  ];
-  const load = async (id = auditId) => { if (!id) return; const result = await fetch(`/api/kanban?auditId=${encodeURIComponent(id)}`).then((response) => response.json()); const nextItems = result.items ?? []; setItems(nextItems); if (selected) setSelected(nextItems.find((item: any) => item.id === selected.id) ?? null); };
-  useEffect(() => { fetch("/api/domain/audits").then((response) => response.json()).then(async (payload) => { const id = payload.audits?.[0]?.id; if (id) { setAuditId(id); await load(id); } }); }, []);
-  const create = async () => { if (!auditId || !title.trim()) return; const result = await fetch("/api/kanban/items", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ auditId, title, description: transcript, priority: "high", source: "field", createdBy: "Alex Rivera" }) }).then((response) => response.json()); setTitle(""); setTranscript(""); await load(); onRun(`${result.item.id} added to field backlog · red attention flag`); };
-  const move = async (item: any, status: string) => { const result = await fetch(`/api/kanban/items/${encodeURIComponent(item.id)}/move`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ status, actor: "Alex Rivera" }) }).then((response) => response.json()); await load(); setSelected(result.item); onRun(`${item.id} moved to ${status}`); };
-  const addCommunication = async () => { if (!selected || !note.trim()) return; const result = await fetch(`/api/kanban/items/${encodeURIComponent(selected.id)}/communications`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ auditId, conversationId: selected.conversationId ?? `KANBAN-${selected.id}`, role: "user", actor: "Alex Rivera", text: note, skillIds: selected.skillIds ?? [] }) }).then((response) => response.json()); setNote(""); await load(); if (result.communication) setSelected((current: any) => ({ ...current, communications: [...(current.communications ?? []), result.communication] })); onRun(`${selected.id} communication recorded with traceability`); };
-  const stageIndex = selected ? stages.findIndex((stage) => stage.id === selected.status) : -1;
-  return <article className="panel field-kanban-panel"><div className="panel-head"><div><SectionKicker icon={ClipboardCheck}>Field engagement Kanban</SectionKicker><h2>Make the next move traceable.</h2><p>Cards move as Muse, the agent, and your answers settle them. Open a card to read every communication, attachment, applied skill, and timestamp.</p></div><div className="field-kanban-head-actions"><Badge tone="red">{items.filter((item) => item.attention).length} new · needs you</Badge><button className="ghost-button" onClick={() => load()}><RefreshCw size={13} />Refresh</button></div></div><div className="field-kanban-create"><input value={title} onChange={(event) => setTitle(event.target.value)} placeholder="Add a field observation or action…" /><input value={transcript} onChange={(event) => setTranscript(event.target.value)} placeholder="Voice transcript / context (optional)…" /><button className="primary-button" onClick={create} disabled={!title.trim()}><Check size={14} />Add a card</button></div><div className="field-kanban-board">{stages.map((stage) => <div className="field-kanban-column" key={stage.id} onDragOver={(event) => event.preventDefault()} onDrop={(event) => { const itemId = event.dataTransfer.getData("text/plain"); const item = items.find((candidate) => candidate.id === itemId); if (item) move(item, stage.id); }}><div className="field-kanban-column-head"><div><strong>{stage.label}</strong><small>{stage.sublabel}</small></div><span>{items.filter((item) => item.status === stage.id).length}</span></div>{stage.id === "backlog" && items.filter((item) => item.attention).length > 0 && <div className="field-kanban-needs"><span />{items.filter((item) => item.attention).length} new · needs you</div>}{items.filter((item) => item.status === stage.id).map((item) => <button key={item.id} draggable className={`field-kanban-card ${item.attention ? "attention" : ""} ${selected?.id === item.id ? "selected" : ""}`} onDragStart={(event) => event.dataTransfer.setData("text/plain", item.id)} onClick={() => setSelected(item)}><div className="field-kanban-card-top"><span>{item.attention && <i className="field-kanban-alert-dot" />} {item.source === "agent" ? "AGENT" : "FIELD"} · {item.id}</span><GripVertical size={13} /></div><strong>{item.title}</strong><p>{item.description || "No description recorded yet."}</p><div className="field-kanban-card-meta"><span>{item.skillIds?.[0] ?? "Needs triage"}</span><span><MessageSquare size={12} />{item.communicationCount ?? item.communications?.length ?? 0}</span><span><Paperclip size={12} />{item.attachmentIds?.length ?? 0}</span></div><div className="field-kanban-card-footer"><small>{item.createdBy} · {new Date(item.updatedAt ?? item.createdAt).toLocaleString()}</small><span className="field-kanban-arrows"><span onClick={(event) => { event.stopPropagation(); const previous = stages[Math.max(0, stages.findIndex((candidate) => candidate.id === item.status) - 1)]; if (previous.id !== item.status) move(item, previous.id); }}>←</span><span onClick={(event) => { event.stopPropagation(); const next = stages[Math.min(stages.length - 1, stages.findIndex((candidate) => candidate.id === item.status) + 1)]; if (next.id !== item.status) move(item, next.id); }}>→</span></span></div></button>)}</div>)}</div>{selected && <AnimatePresence><motion.aside className="field-kanban-drawer" initial={{ opacity: 0, x: 24 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 24 }}><div className="field-kanban-drawer-head"><div><span className="tiny-label">TRACEABLE CARD</span><h3>{selected.title}</h3><small>{selected.id} · {selected.source} · {selected.createdBy}</small></div><button className="icon-button" onClick={() => setSelected(null)}><X size={15} /></button></div><div className="field-kanban-drawer-status"><Badge tone={selected.attention ? "red" : selected.status === "final" ? "green" : "blue"}>{selected.status === "in_progress" ? "being made real" : selected.status}</Badge><span>{selected.priority} priority</span><span>{new Date(selected.updatedAt ?? selected.createdAt).toLocaleString()}</span></div><p className="field-kanban-drawer-description">{selected.description || "No description recorded yet."}</p><div className="field-kanban-drawer-actions">{stageIndex > 0 && <button className="ghost-button" onClick={() => move(selected, stages[stageIndex - 1].id)}>← Previous</button>}{stageIndex < stages.length - 1 && <button className="primary-button" onClick={() => move(selected, stages[stageIndex + 1].id)}>Next <MoveRight size={13} /></button>}</div><div className="field-kanban-trace-block"><span className="tiny-label">APPLIED SKILLS</span><div className="field-kanban-skill-list">{(selected.skillIds ?? []).length ? selected.skillIds.map((skill: string) => <Badge key={skill} tone="cyan" subtle>{skill}</Badge>) : <small>No skill recorded on this card yet.</small>}</div></div><div className="field-kanban-trace-block"><span className="tiny-label">ATTACHED EVIDENCE</span>{(selected.attachments ?? []).length ? selected.attachments.map((attachment: any) => <div className="field-kanban-attachment" key={attachment.id}><Paperclip size={13} /><div><strong>{attachment.filename}</strong><small>{attachment.kind} · {attachment.sha256?.slice(0, 12)}… · {new Date(attachment.createdAt).toLocaleString()}</small></div></div>) : <small>No attachments recorded.</small>}</div><div className="field-kanban-trace-block"><span className="tiny-label">COMMUNICATIONS · {selected.communications?.length ?? 0}</span><div className="field-kanban-timeline">{(selected.communications ?? []).length ? selected.communications.map((communication: any) => <div className={`field-kanban-message ${communication.role}`} key={communication.id}><div><strong>{communication.role}</strong><small>{communication.actor} · {new Date(communication.createdAt).toLocaleString()}</small></div><p>{communication.text}</p>{communication.skillIds?.length > 0 && <span className="field-kanban-message-skill">skill: {communication.skillIds.join(" · ")}</span>}</div>) : <small>No conversation turns are attached to this card yet.</small>}</div><div className="field-kanban-note"><textarea rows={3} value={note} onChange={(event) => setNote(event.target.value)} placeholder="Add a traced note to this card…" /><button className="primary-button" onClick={addCommunication} disabled={!note.trim()}><MessageSquare size={13} />Add communication</button></div></div></motion.aside></AnimatePresence>}</article>;
-}
-
-function GovernanceView({ onRun }: { onRun: (label: string) => void }) {
-  const [board, setBoard] = useState<any>(null);
-  const [selected, setSelected] = useState<any>(null);
-  const [note, setNote] = useState("");
-  const [deferUntil, setDeferUntil] = useState("2026-11-20T12:00");
-  const [dragged, setDragged] = useState<string | null>(null);
-  const load = () => fetch("/api/governance/board").then((response) => response.json()).then((payload) => { setBoard(payload); if (!selected) setSelected(payload.items[0]); });
-  useEffect(() => { load(); }, []);
-  const move = async (id: string, target: string) => { const result = await fetch("/api/governance/move", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id, target, actor: "Jordan Lewis" }) }).then((response) => response.json()); if (!result.ok) { onRun(`Move blocked · ${result.error}${result.missingFields ? ` · ${result.missingFields.join(", ")}` : ""}`); return; } onRun(`Governance item moved · ${target}`); load(); };
-  const decide = async (action: "accept" | "decline" | "defer") => { if (!selected) return; const result = await fetch("/api/governance/decide", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: selected.id, action, note, deferUntil, actor: "Jordan Lewis" }) }).then((response) => response.json()); if (!result.ok) { onRun(`Decision blocked · ${result.error}`); return; } onRun(`${action} recorded · ${selected.id}`); setNote(""); load(); };
-  return <div className="view-stack"><div className="view-title-row"><div><SectionKicker icon={Users}>Human governance</SectionKicker><h1>Human in the loop and human on the loop.</h1><p>Agents can prepare, route, and recommend. People must accept, decline, or defer with a recorded update and accountable timing.</p></div><div className="view-actions"><Badge tone="amber">Decision ledger active</Badge><button className="ghost-button" onClick={load}><RefreshCw size={14} />Refresh board</button></div></div><div className="governance-callout"><div><span className="tiny-label">HUMAN IN THE LOOP</span><strong>Approval at the decision point</strong><p>Accept, decline, or defer. Declines require a reason. Deferrals require a reason and future date.</p></div><div><span className="tiny-label">HUMAN ON THE LOOP</span><strong>Supervision while agents run</strong><p>Monitor agent state, inspect traces, pause or kill an agent, and preserve the lifecycle event.</p></div><div><span className="tiny-label">SKILL APPLICATION</span><strong>Every card carries a skill</strong><p>Moving a card does not bypass the skill: missing required fields block progression and create a warning.</p></div></div><FieldKanbanPanel onRun={onRun} /><div className="governance-layout"><section className="kanban-board"><div className="kanban-head"><span className="tiny-label">AUDIT DECISION KANBAN</span><span>{board?.items?.length ?? 0} governed work items</span></div><div className="kanban-columns">{(board?.columns ?? []).map((column: string) => <div className="kanban-column" key={column} onDragOver={(event) => event.preventDefault()} onDrop={() => dragged && move(dragged, column)}><div className="kanban-column-head"><strong>{column.replace("_", " ")}</strong><span>{board?.items?.filter((item: any) => item.state === column).length ?? 0}</span></div>{board?.items?.filter((item: any) => item.state === column).map((item: any) => <button key={item.id} draggable className={`kanban-card ${selected?.id === item.id ? "active" : ""}`} onDragStart={() => setDragged(item.id)} onClick={() => setSelected(item)}><div className="kanban-card-top"><span>{item.id}</span><Badge tone={item.priority === "critical" ? "red" : item.priority === "high" ? "amber" : "blue"} subtle>{item.priority}</Badge></div><strong>{item.title}</strong><p>{item.summary}</p><div className="kanban-card-meta"><span><Workflow size={11} />{item.skillId}</span><span>{item.completedFields.length}/{item.requiredFields.length} fields</span></div>{item.state === "deferred" && <small className="defer-clock"><Clock3 size={11} />deferred {item.deferredDurationHours ?? 0}h · until {item.deferUntil}</small>}</button>)}</div>)}</div></section><aside className="governance-detail panel"><div className="panel-head"><div><span className="tiny-label">SELECTED DECISION</span><h2>{selected?.id ?? "Select a card"}</h2><p>{selected?.title ?? "Choose a governed work item."}</p></div>{selected && <Badge tone={selected.state === "complete" ? "green" : selected.state === "deferred" ? "amber" : "blue"}>{selected.state}</Badge>}</div>{selected && <><div className="governance-skill-link"><Workflow size={13} /><span>Applied skill</span><strong>{selected.skillId}</strong><small>{selected.agentId}</small></div><p className="governance-summary">{selected.summary}</p><div className="required-fields"><span className="tiny-label">REQUIRED BEFORE READY</span>{selected.requiredFields.map((field: string) => <span className={selected.completedFields.includes(field) ? "field-done" : "field-missing"} key={field}>{selected.completedFields.includes(field) ? <Check size={11} /> : <CircleAlert size={11} />}{field}</span>)}</div><label className="governance-note">Decision update<textarea rows={3} value={note} onChange={(event) => setNote(event.target.value)} placeholder="Required for accept, decline, and defer. Explain the decision…" /></label><label className="governance-note">Defer until<input type="datetime-local" value={deferUntil} onChange={(event) => setDeferUntil(event.target.value)} /></label><div className="decision-actions"><button className="primary-button" onClick={() => decide("accept")}><Check size={13} />Accept</button><button className="ghost-button danger" onClick={() => decide("decline")}><X size={13} />Decline</button><button className="ghost-button" onClick={() => decide("defer")}><Clock3 size={13} />Defer</button></div><div className="governance-history"><span className="tiny-label">DECISION HISTORY</span>{selected.history.map((event: any, index: number) => <div key={`${event.at}-${index}`}><strong>{event.action}</strong><span>{event.actor} · {event.at}</span><p>{event.note}</p></div>)}</div></>}</aside></div></div>;
-}
-
-function PolicyAsCodeView({ onRun }: { onRun: (label: string) => void }) {
-  const [evaluation, setEvaluation] = useState<any>(null);
-  const [policyGraph, setPolicyGraph] = useState<any>(null);
-  const [selectedRule, setSelectedRule] = useState<any>(null);
-  const [selectedDisposition, setSelectedDisposition] = useState<string>("");
-  const [showGraph, setShowGraph] = useState(false);
-  const [busy, setBusy] = useState(false);
-  const [compilerResult, setCompilerResult] = useState<any>(null);
-  useEffect(() => { fetch("/api/policy/evaluate", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ findingId: "FIND-2026-04" }) }).then((response) => response.json()).then((payload) => { setEvaluation(payload); setSelectedRule(payload.results?.[0]?.rule); setSelectedDisposition(payload.results?.[0]?.disposition ?? ""); }); }, []);
-  const evaluate = async () => { setBusy(true); const payload = await fetch("/api/policy/evaluate", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ findingId: "FIND-2026-04", asOf: new Date().toISOString().slice(0, 10) }) }).then((response) => response.json()); setEvaluation(payload); setBusy(false); onRun(`Part 21 policy evaluated · ${payload.coverage}% coverage · ${payload.counts.gaps} gaps`); };
-  const traverse = async () => { const payload = policyGraph ?? await fetch("/api/policy/graph").then((response) => response.json()); setPolicyGraph(payload); setShowGraph(true); onRun(`Policy graph traversed · ${payload.nodes.length} nodes · ${payload.edges.length} edges`); };
-  const compile = async () => { const payload = await fetch("/api/policy/compile", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ documentId: "10-cfr-part-21" }) }).then((response) => response.json()); setCompilerResult(payload); onRun(`Document compiled · ${payload.candidateRules.length} rule candidates · review required`); };
-  return <div className="view-stack"><div className="view-title-row"><div><SectionKicker icon={ShieldCheck}>Policy as code</SectionKicker><h1>Turn Part 21 into an executable, source-linked control model.</h1><p>Not just RAG: versioned rules evaluate evidence, preserve provenance, and route conclusions to human gates.</p></div><div className="view-actions"><a className="ghost-button" href={part21PolicyPack.sourceUri} target="_blank" rel="noreferrer"><Link2 size={14} />Open eCFR source</a><button className="ghost-button" onClick={compile}><Sparkles size={14} />Compile document</button><button className="primary-button" onClick={evaluate} disabled={busy}><RefreshCw size={14} />{busy ? "Evaluating…" : "Evaluate Part 21"}</button></div></div><div className="policy-explain-strip"><div><span className="tiny-label">WHAT THIS IS</span><strong>Semantic policy graph + deterministic evaluators</strong><p>Document → provision → executable rule → evidence → agent evaluator → human gate.</p></div><div><span className="tiny-label">WHAT THIS IS NOT</span><strong>Not an autonomous compliance verdict</strong><p>Client interpretations, applicability, safety significance, and reportability remain human decisions.</p></div><div><span className="tiny-label">PACK VERSION</span><strong>{part21PolicyPack.policyVersion}</strong><p>{part21PolicyPack.rules.length} rules · {part21PolicyPack.sourceAuthority}</p></div></div>{evaluation && <div className="policy-summary-grid"><div className="policy-score-card"><span className="tiny-label">EXECUTABLE COVERAGE</span><strong>{evaluation.coverage}%</strong><div className="policy-meter"><span style={{ width: `${evaluation.coverage}%` }} /></div><small>{evaluation.counts.covered} covered · {evaluation.counts.partial} partial · {evaluation.counts.gaps} gaps</small></div><div className="policy-summary-card"><span className="tiny-label">FINDING CONTEXT</span><strong>{evaluation.findingId}</strong><p>Evaluated as of {evaluation.asOf}. Every result carries source URI, policy version, evaluator, and human gate.</p></div><div className="policy-summary-card"><span className="tiny-label">TRACE MODEL</span><strong>Document → Rule → Evidence</strong><p>Traversal is available to agents through MCP tools and to auditors through this workspace.</p></div></div>}{compilerResult && <section className="panel compiler-result"><div className="panel-head"><div><SectionKicker icon={Sparkles}>Document-to-policy compiler</SectionKicker><h2>Candidate rules generated from the source document</h2><p>{compilerResult.provider}</p></div><Badge tone="amber">Human activation required</Badge></div><div className="compiler-pipeline">{compilerResult.pipeline.map((step: string, index: number) => <span key={step}><b>0{index + 1}</b>{step}</span>)}</div><div className="compiler-warning"><TriangleAlert size={14} />{compilerResult.warning}</div></section>}<div className="policy-workspace"><section className="panel policy-rules-panel"><div className="panel-head"><div><SectionKicker icon={ListChecks}>Rule coverage</SectionKicker><h2>Part 21 policy rules</h2><p>Click a rule to inspect what the agent tests and what a human must decide.</p></div><Badge tone="cyan">{evaluation?.results?.length ?? part21PolicyPack.rules.length} rules</Badge></div><div className="policy-rule-list">{evaluation?.results?.map((item: any) => <button key={item.rule.id} className={`policy-rule-row ${selectedRule?.id === item.rule.id ? "active" : ""}`} onClick={() => { setSelectedRule(item.rule); setSelectedDisposition(item.disposition); }}><span className={`policy-disposition ${item.disposition}`}>{item.disposition === "covered" ? <Check size={12} /> : item.disposition === "partial" ? "~" : <TriangleAlert size={12} />}</span><span><strong>{item.rule.citation} · {item.rule.title}</strong><small>{item.rule.intent}</small></span><Badge tone={item.disposition === "covered" ? "green" : item.disposition === "partial" ? "amber" : "red"} subtle>{item.disposition}</Badge><ChevronRight size={13} /></button>)}</div></section><aside className="panel policy-rule-detail"><div className="panel-head"><div><span className="tiny-label">SELECTED RULE</span><h2>{selectedRule?.citation ?? "—"}</h2><p>{selectedRule?.title ?? "Select a rule"}</p></div><Badge tone={selectedDisposition === "covered" ? "green" : selectedDisposition === "partial" ? "amber" : "red"}>{selectedDisposition || "pending"}</Badge></div>{selectedRule && <><div className="policy-intent"><span className="tiny-label">INTENT</span><p>{selectedRule.intent}</p></div><div className="policy-detail-block"><span className="tiny-label">EVIDENCE TO TEST</span>{selectedRule.requiredEvidence.map((item: string) => <div className="policy-evidence-item" key={item}><FileCheck2 size={12} />{item}</div>)}</div><div className="policy-detail-block"><span className="tiny-label">PROVENANCE & GATE</span><div className="policy-meta-row"><span>Evaluator</span><strong>{selectedRule.evaluator}</strong></div><div className="policy-meta-row"><span>Source section</span><strong>{selectedRule.sourceSectionId}</strong></div><div className="policy-meta-row"><span>Human decision</span><strong>{selectedRule.humanGate}</strong></div></div><button className="text-button" onClick={() => onRun(`Rule inspected · ${selectedRule.id} · human gate required`)}>Add to audit trace <ArrowUpRight size={13} /></button></>}</aside></div><section className="panel policy-graph-panel"><div className="panel-head"><div><SectionKicker icon={Network}>Policy semantic graph</SectionKicker><h2>Document-to-rule traversal</h2><p>See how the agent moves from the authoritative document to a testable rule and approval checkpoint.</p></div><button className="ghost-button" onClick={traverse}>{showGraph ? "Refresh graph" : "Traverse graph"}<GitBranch size={13} /></button></div>{showGraph && policyGraph ? <div className="policy-graph-view"><div className="policy-graph-lane"><div className="policy-graph-node source"><small>AUTHORITY</small><strong>10 CFR Part 21</strong><span>eCFR · {policyGraph.document.policyVersion}</span></div><ChevronRight size={16} /><div className="policy-graph-node"><small>RULE SET</small><strong>{policyGraph.document.rules.length} executable rules</strong><span>Versioned and source-linked</span></div><ChevronRight size={16} /><div className="policy-graph-node active"><small>EVALUATOR</small><strong>Part 21 Policy Evaluator</strong><span>MCP: policy_evaluate</span></div><ChevronRight size={16} /><div className="policy-graph-node gate"><small>DECISION</small><strong>Human gate</strong><span>Designated person / quality</span></div></div><div className="policy-graph-stats"><span>{policyGraph.nodes.length} nodes</span><span>{policyGraph.edges.length} edges</span><span>Source-linked</span><span>Human-gated</span></div></div> : <div className="policy-graph-empty"><Network size={24} /><p>Traverse the graph to materialize the document → rule → evaluator → human gate path.</p></div>}</section></div>;
-}
-
-function RegulatoryTraceView({ onRun }: { onRun: (label: string) => void }) {
-  const [selectedSection, setSelectedSection] = useState("21.21");
-  const section = part21RegulatoryPack.sections.find((item: any) => item.id === selectedSection) ?? part21RegulatoryPack.sections[0];
-  return <div className="view-stack"><div className="view-title-row"><div><SectionKicker icon={FileSearch}>Regulatory trace</SectionKicker><h1>Traverse from a finding to the Part 21 provision, risk, and remediation.</h1><p>The agent uses a source-linked Part 21 pack plus a client-approved interpretation overlay. This is not a regulatory determination by itself.</p></div><div className="view-actions"><Badge tone="amber">Client interpretation required</Badge><button className="primary-button" onClick={() => onRun("Regulatory tree traversed · 21.21 → 21.51 → 21.61")}> <Waypoints size={14} />Traverse finding</button></div></div><div className="regulatory-hero"><div><span className="tiny-label">FINDING → REGULATION → CONTROL → REMEDIATION</span><div className="regulatory-path">{regulatoryTraceForFinding.path.map((item: string, index: number) => <span key={item}><b>{item}</b>{index < regulatoryTraceForFinding.path.length - 1 && <ChevronRight size={13} />}</span>)}</div><p>{regulatoryTraceForFinding.violationHypothesis}</p></div><div className="risk-block"><span className="tiny-label">RISK IF NOT REMEDIATED</span><strong>{regulatoryTraceForFinding.risk}</strong><small>{regulatoryTraceForFinding.impactIfNotRemediated}</small></div></div><div className="regulatory-layout"><aside className="reg-section-rail"><div className="skill-rail-label">PART 21 SECTION INDEX</div>{part21RegulatoryPack.sections.map((item: any) => <button key={item.id} className={`reg-section-option ${item.id === selectedSection ? "active" : ""}`} onClick={() => setSelectedSection(item.id)}><strong>§ {item.id}</strong><span>{item.title}</span></button>)}</aside><section className="reg-section-detail"><div className="section-kicker"><FileSearch size={13} /><span>§ {section.id} · {section.category}</span></div><h2>{section.title}</h2><p className="reg-summary">{section.summary}</p><div className="reg-columns"><div><span className="tiny-label">OBLIGATIONS</span><ul>{section.obligations.map((item: string) => <li key={item}><CheckCircle2 size={13} />{item}</li>)}</ul></div><div><span className="tiny-label">EVIDENCE TO TEST</span><ul>{section.evidenceToTest.map((item: string) => <li key={item}><FileCheck2 size={13} />{item}</li>)}</ul></div><div className="reg-unmet"><span className="tiny-label">IF UNMET</span><p>{section.ifUnmet}</p><Badge tone={section.defaultRisk === "High" ? "red" : "amber"}>Default risk: {section.defaultRisk}</Badge></div></div></section></div><div className="remediation-grid"><article className="panel"><div className="panel-head"><div><SectionKicker icon={ShieldCheck}>Remediation path</SectionKicker><h2>Recommended accountable actions</h2></div><Badge tone="amber">Human approval</Badge></div><ol className="remediation-list">{regulatoryTraceForFinding.remediation.map((item: string, index: number) => <li key={item}><span>{index + 1}</span><p>{item}</p></li>)}</ol></article><article className="panel"><div className="panel-head"><div><SectionKicker icon={Link2}>Authoritative sources</SectionKicker><h2>Regulatory and implementation references</h2></div><Badge tone="blue">{part21RegulatoryPack.sources.length} links</Badge></div><div className="source-link-list">{part21RegulatoryPack.sources.map((source: any) => <a key={source.id} href={source.url} target="_blank" rel="noreferrer"><span><strong>{source.label}</strong><small>{source.url}</small></span><ArrowUpRight size={14} /></a>)}</div></article></div></div>;
-}
-
-function PersonaWorkspace({ persona, onRun }: { persona: AssurancePersona; onRun: (label: string) => void }) {
-  const primaryMetric = persona.id === "manager" ? ["82%", "12", "3", "19"] : persona.id === "auditor" ? ["32 / 47", "4", "14", "3"] : persona.id === "supplier" ? ["1", "4", "2", "7B-441"] : persona.id === "engineering" ? ["2", "6", "3", "CHG-014"] : ["3", "4", "2", "30d"];
-  const metricLabels = persona.id === "manager" ? ["Readiness", "Open findings", "Supplier watch", "Changes / 30d"] : persona.id === "auditor" ? ["Evidence linked", "Review-due", "Mapped controls", "Findings"] : persona.focus;
-  return <div className="persona-detail"><div className="persona-detail-head"><div><SectionKicker icon={UserCog}>{persona.title}</SectionKicker><h2>{persona.description}</h2></div><Badge tone="cyan">Lens: {persona.defaultView}</Badge></div><div className="persona-metric-row">{primaryMetric.map((value, index) => <div className="persona-metric" key={metricLabels[index] ?? index}><span>{metricLabels[index] ?? persona.focus[index]}</span><strong>{value}</strong></div>)}</div><div className="persona-columns"><div><span className="tiny-label">WHAT TO LOOK AT</span><ul>{persona.focus.map((item) => <li key={item}><CheckCircle2 size={13} />{item}</li>)}</ul></div><div><span className="tiny-label">QUESTIONS TO ASK</span><ul>{persona.primaryQuestions.map((item) => <li key={item}><Search size={13} />{item}</li>)}</ul></div><div className="persona-alert"><span className="tiny-label">ALERT RULE</span><p>{persona.alertRule}</p></div></div><div className="persona-actions"><button className="primary-button" onClick={() => onRun(`${persona.title} lens activated · routed to ${persona.defaultView}`)}><Eye size={14} />Activate this lens</button><button className="ghost-button" onClick={() => onRun(`${persona.title} checklist opened`)}>Open checklist <ChevronRight size={14} /></button></div></div>;
-}
-
-function RolesView({ onRun }: { onRun: (label: string) => void }) {
-  const [selected, setSelected] = useState("manager");
-  const persona = assurancePersonas.find((item) => item.id === selected) ?? assurancePersonas[0];
-  return <div className="view-stack"><div className="view-title-row"><div><SectionKicker icon={Users}>Role workspaces</SectionKicker><h1>Same assurance system. Different accountable lens.</h1><p>Select the persona that matches the decision being made. The graph, evidence, alerts, and next moves stay connected.</p></div><Badge tone="cyan">5 personas</Badge></div><div className="persona-layout"><aside className="persona-rail">{assurancePersonas.map((item) => <button key={item.id} className={`persona-option ${item.id === selected ? "active" : ""}`} onClick={() => setSelected(item.id)}><span className="persona-avatar"><UserCog size={15} /></span><span><strong>{item.label}</strong><small>{item.title}</small></span><ChevronRight size={14} /></button>)}</aside><PersonaWorkspace persona={persona} onRun={onRun} /></div><div className="persona-trace-strip"><span><Link2 size={14} />Every persona uses the same Part 21 ontology, bitemporal graph, MCP connectors, and human gates.</span><button className="text-button" onClick={() => onRun("Persona permissions and traceability contract opened")}>View contract <ArrowUpRight size={13} /></button></div></div>;
-}
-
-function EvidenceTracePanel({ onRun }: { onRun: (label: string) => void }) {
-  const [file, setFile] = useState<File | null>(null);
-  const [tags, setTags] = useState("receiving,heat-lot,FIND-2026-04");
-  const [registered, setRegistered] = useState<any>(null);
-  const [draft, setDraft] = useState<any>(null);
-  const register = async () => { if (!file) return; const contentBase64 = await new Promise<string>((resolve, reject) => { const reader = new FileReader(); reader.onload = () => resolve(String(reader.result ?? "").split(",")[1] ?? ""); reader.onerror = () => reject(reader.error); reader.readAsDataURL(file); }); const result = await fetch("/api/evidence/intake", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: file.name, mimeType: file.type, size: file.size, contentBase64, tags: tags.split(",").map((tag) => tag.trim()).filter(Boolean), linkedFinding: "FIND-2026-04" }) }).then((response) => response.json()); setRegistered(result); onRun(`${result.record.id} uploaded and registered · linked to FIND-2026-04`); };
-  const buildDraft = async () => { const result = await fetch("/api/reports/draft?findingId=FIND-2026-04").then((response) => response.json()); setDraft(result); onRun("Audit report draft prefilled from findings and evidence"); };
-  return <article className="panel evidence-trace-panel"><div className="panel-head"><div><SectionKicker icon={FileUp}>Evidence + report traceability</SectionKicker><h2>Attach evidence. Keep the finding defensible.</h2><p>Register an asset against the finding, preserve tags and provenance, then prefill report sections for auditor editing.</p></div><Badge tone="blue">Human verification</Badge></div><div className="evidence-intake-row"><label className="file-picker"><FileUp size={15} /><span>{file ? file.name : "Choose evidence asset"}</span><input type="file" onChange={(event) => setFile(event.target.files?.[0] ?? null)} /></label><label className="tag-input">Tags<input value={tags} onChange={(event) => setTags(event.target.value)} /></label><button className="primary-button" disabled={!file} onClick={register}><Link2 size={14} />Register to finding</button><button className="ghost-button" onClick={buildDraft}><FileCheck2 size={14} />Draft report</button></div>{registered && <div className="trace-result"><CheckCircle2 size={14} /><span><strong>{registered.record.id}</strong> · {registered.record.name} · {registered.record.status}</span><small>linked to {registered.record.linkedFinding} · SHA-256 {registered.record.sha256?.slice(0, 16)}… · human verification required</small></div>}{draft && <details className="draft-preview" open><summary>Prefilled report sections · auditor edits required</summary><pre>{JSON.stringify(draft.sections, null, 2)}</pre></details>}</article>;
-}
-
-function AgentObservabilityView({ onRun }: { onRun: (label: string) => void }) {
-  const [selectedAgent, setSelectedAgent] = useState(agentKitAgents[0]?.id ?? "scope-facilitator");
-  const [activity, setActivity] = useState<any[]>([]);
-  const [manifest, setManifest] = useState<any>(null);
-  const [custom, setCustom] = useState({ findingId: "FIND-CUSTOM-07", title: "Supplier notification was not linked to the affected baseline", productId: "NSS-4820", supplierId: "SUP-044", controlFamily: "Supplier oversight", alternateConnector: "vendor-erp-asterion" });
-  const [customResult, setCustomResult] = useState<any>(null);
-  useEffect(() => { fetch(`/api/agentkit/activity?agentId=${selectedAgent}`).then((response) => response.json()).then((payload) => setActivity(payload.agents ?? [])); }, [selectedAgent]);
-  useEffect(() => { fetch("/api/agentkit/manifest.json").then((response) => response.json()).then(setManifest); }, []);
-  const runCustom = async () => { const result = await fetch("/api/agentkit/simulate-custom", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(custom) }).then((response) => response.json()); setCustomResult(result); onRun(`${custom.findingId} custom execution completed · 5 phase gates recorded`); };
-  const downloadGraph = async () => { const graph = await fetch("/api/graph/export?findingId=FIND-2026-04").then((response) => response.json()); downloadJson("FIND-2026-04-bitemporal-graph.json", graph); onRun("Complete bitemporal graph exported · ontology + temporal events"); };
-  return <div className="view-stack"><div className="view-title-row"><div><SectionKicker icon={Bot}>Agent observability</SectionKicker><h1>Click an agent. See what it did, why, and what it asked a human to approve.</h1><p>Every tool call is traceable to a connector, ontology context, evidence result, and human gate.</p></div><div className="view-actions"><button className="ghost-button" onClick={() => manifest && downloadJson("agentkit-manifest.json", manifest)}><Download size={14} />Manifest JSON</button><button className="primary-button" onClick={downloadGraph}><Download size={14} />Graph export</button></div></div><AgentRuntimeControls onRun={onRun} /><div className="agent-observe-layout"><aside className="agent-list">{agentKitAgents.map((agent) => <button key={agent.id} className={`agent-list-item ${selectedAgent === agent.id ? "active" : ""}`} onClick={() => setSelectedAgent(agent.id)}><span className="agent-list-icon"><Bot size={14} /></span><span><strong>{agent.name}</strong><small>{agent.id}</small></span><StatusDot tone="green" pulse /></button>)}</aside><section className="agent-inspector"><div className="panel-head"><div><span className="tiny-label">LIVE AGENT TRACE</span><h2>{activity[0]?.agent ?? selectedAgent}</h2><p>{activity[0]?.route ?? "Select an agent to inspect its route."}</p></div><Badge tone="green">Human-gated</Badge></div>{activity.length === 0 ? <div className="empty-agent"><Bot size={22} /><p>Select an agent to inspect tool calls, provenance, and approvals.</p></div> : activity.map((item) => <div className="agent-activity-card" key={item.phase}><div className="agent-activity-head"><strong>Phase {item.phase} · {item.phaseLabel}</strong><Badge tone={item.humanGate.decision === "Approved" ? "green" : "amber"} subtle>{item.humanGate.decision}</Badge></div><div className="agent-skill-used">{item.skill ? <><div className="agent-skill-used-head"><Workflow size={13} /><span>SKILL USED</span><Badge tone="cyan" subtle>{item.skill.phase}</Badge></div><strong>{item.skill.name}</strong><p>{item.skill.purpose}</p><small>{item.skill.route} · {item.skill.contract} · {item.skill.questionCount} guided questions</small><small>Source: {item.skill.source} · Human gate: {item.skill.humanGate}</small></> : <span>No configured skill returned for this phase.</span>}</div><div className="agent-mini-tools">{item.toolCalls.map((call: any) => <span key={call.sequence}><Command size={11} />{call.tool}<small>{call.connector}</small></span>)}</div><div className="agent-gate-line"><UserRoundCheck size={13} /><span>{item.humanGate.approver}</span><em>{item.humanGate.rationale}</em></div></div>)}</section></div><article className="panel custom-sim-panel"><div className="panel-head"><div><SectionKicker icon={Sparkles}>Alternative custom audit</SectionKicker><h2>Simulate a new finding through all five phases</h2><p>Uses an alternate tool route and preserves the same ontology, temporal, policy-as-code, and traceability contracts.</p></div><Badge tone="amber">Custom path</Badge></div><div className="custom-form-grid"><label>Finding ID<input value={custom.findingId} onChange={(event) => setCustom({ ...custom, findingId: event.target.value })} /></label><label>Product ID<input value={custom.productId} onChange={(event) => setCustom({ ...custom, productId: event.target.value })} /></label><label>Supplier ID<input value={custom.supplierId} onChange={(event) => setCustom({ ...custom, supplierId: event.target.value })} /></label><label>Control family<input value={custom.controlFamily} onChange={(event) => setCustom({ ...custom, controlFamily: event.target.value })} /></label><label className="wide-field">Finding title<input value={custom.title} onChange={(event) => setCustom({ ...custom, title: event.target.value })} /></label><label>Alternate connector<select value={custom.alternateConnector} onChange={(event) => setCustom({ ...custom, alternateConnector: event.target.value })}><option value="vendor-erp-asterion">Asterion Vendor ERP</option><option value="document-repository-live">Controlled Document Repository</option></select></label></div><button className="primary-button" onClick={runCustom}><Play size={14} />Run alternative five-phase flow</button>{customResult && <div className="custom-result"><div className="panel-head"><div><span className="tiny-label">CUSTOM EXECUTION COMPLETE</span><h3>{customResult.finding.id} · {customResult.finding.title}</h3></div><Badge tone="green">{customResult.steps.length} gates</Badge></div>{customResult.steps.map((step: any) => <details key={step.phase} open={step.phase === 1}><summary>Phase {step.phase} · {step.phaseLabel} · {step.toolCalls.length} alternative calls · {step.humanGate.decision}</summary><pre>{JSON.stringify({ route: step.route, toolCalls: step.toolCalls, humanGate: step.humanGate }, null, 2)}</pre></details>)}</div>}</article><EvidenceTracePanel onRun={onRun} />{manifest && <article className="panel manifest-panel"><div className="panel-head"><div><SectionKicker icon={FileSearch}>AgentKit manifest payload</SectionKicker><h2>Manifest + Asterion integration</h2><p>The payload below is the exact JSON the client adapter can discover.</p></div><button className="ghost-button" onClick={() => downloadJson("agentkit-manifest.json", manifest)}><Download size={14} />Download</button></div><pre className="manifest-json">{JSON.stringify({ ...manifest, connectors: manifest.connectors?.filter((connector: any) => connector.id === "vendor-erp-asterion"), integrationExample: { tool: "erp_search_material_lots", connector: "vendor-erp-asterion", arguments: { supplierId: "SUP-044", productId: "NSS-4820", lookbackDays: 180 } } }, null, 2)}</pre></article>}</div>;
-}
-
-function AgentRuntimeControls({ onRun }: { onRun: (label: string) => void }) {
-  const [registry, setRegistry] = useState<any>(null);
-  const load = () => fetch("/api/agents/registry").then((response) => response.json()).then(setRegistry);
-  useEffect(() => { load(); }, []);
-  const control = async (agentId: string, action: "pause" | "resume" | "kill" | "restart") => { const reason = action === "kill" ? window.prompt("Kill reason required for the audit trail:", "Operator intervention") ?? "" : ""; if (action === "kill" && !reason) return; const result = await fetch("/api/agents/control", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ agentId, action, reason }) }).then((response) => response.json()); onRun(result.ok ? `${agentId} · ${action} recorded` : `Agent control blocked · ${result.error}`); load(); };
-  return <article className="panel agent-runtime-panel"><div className="panel-head"><div><SectionKicker icon={ServerCog}>Embedded ECC runtime registry</SectionKicker><h2>Supervise the agents that are running</h2><p>Demo registry is inside this application. Production adapter target: OpenTelemetry traces plus the client’s Gemini/Vertex agent runtime.</p></div><Badge tone="cyan">{registry?.mode ?? "loading"}</Badge></div><div className="runtime-agent-grid">{registry?.agents?.map((agent: any) => <div className="runtime-agent-card" key={agent.agentId}><div><strong>{agent.name}</strong><small>{agent.agentId}</small></div><Badge tone={agent.state === "running" ? "green" : agent.state === "killed" ? "red" : "amber"} subtle>{agent.state}</Badge><p>Heartbeat {agent.lastHeartbeat}{agent.killReason ? ` · ${agent.killReason}` : ""}</p><div className="runtime-agent-actions"><button onClick={() => control(agent.agentId, agent.state === "paused" ? "resume" : "pause")}>{agent.state === "paused" ? "Resume" : "Pause"}</button><button onClick={() => control(agent.agentId, "restart")}>Restart</button><button className="danger" onClick={() => control(agent.agentId, "kill")}>Kill</button></div></div>)}</div></article>;
-}
-
-function GroundedChat({ onRun }: { onRun: (label: string) => void }) {
-  const [question, setQuestion] = useState("What would disprove the current finding?");
-  const [answer, setAnswer] = useState<any>(null);
-  const [busy, setBusy] = useState(false);
-  const ask = async (nextQuestion = question) => { setBusy(true); const result = await fetch("/api/ai/ask", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ question: nextQuestion }) }).then((response) => response.json()); setAnswer(result); setBusy(false); onRun(`Grounded graph question answered · ${result.appliedSkill} · ${result.provider}`); };
-  return <div className="ai-chat-panel"><div className="ai-chat-intro"><div className="ai-orb"><Sparkles size={17} /></div><div><span className="tiny-label">GROUNDED ASSURANCE COPILOT</span><strong>Ask the graph, not just the dashboard.</strong><p>Questions are grounded in the synthetic knowledge graph, temporal events, evidence records, and source-linked Part 21 trace.</p></div></div><div className="chat-suggestions"><button onClick={() => setQuestion("What would disprove the current finding?")}>What would disprove this finding?</button><button onClick={() => setQuestion("Which Part 21 requirement supports this recommendation?")}>Which requirement supports this?</button><button onClick={() => setQuestion("What changed between the last approved baseline and today?")}>What changed since baseline?</button></div><div className="chat-input-row"><textarea value={question} onChange={(event) => setQuestion(event.target.value)} rows={2} /><button className="primary-button" onClick={() => ask()} disabled={busy || !question.trim()}>{busy ? "Thinking…" : "Ask"}<Sparkles size={14} /></button></div>{answer && <div className="chat-answer"><div className="chat-answer-head"><Badge tone={answer.provider.includes("demo") || answer.provider.includes("fallback") ? "amber" : "green"}>{answer.provider}</Badge><span>Human review required</span></div><div className="chat-skill-applied"><Workflow size={12} /><span>Skill applied: <strong>{answer.appliedSkill}</strong></span><span>Agent map → ECC skill → human gate</span></div>{answer.skillInvocation && <details className="skill-invocation-details"><summary>Inspect dynamic skill invocation</summary><div><strong>{answer.skillInvocation.name}</strong><small>{answer.skillInvocation.route} · {answer.skillInvocation.invocationMode}</small><small>Contract: {answer.skillInvocation.contract}</small><small>Gate: {answer.skillInvocation.humanGate}</small></div></details>}<p>{answer.answer}</p><div className="chat-grounding"><span><Network size={12} />{answer.grounding.graphEntities} graph entities</span><span><History size={12} />{answer.grounding.temporalEvents} temporal events</span><span><FileSearch size={12} />{answer.grounding.regulatoryPath.slice(2).join(" → ")}</span></div>{answer.traversalProof && <div className="chat-grounding"><span><DatabaseZap size={12} />Traversed {answer.traversalProof.visitedNodeIds?.length ?? 0} nodes</span><span><Link2 size={12} />{answer.traversalProof.traversedEdgeIds?.length ?? 0} graph edges</span><span><CheckCircle2 size={12} />{answer.traversalProof.source}</span></div>}<div className="chat-followups"><span className="tiny-label">NEXT QUESTIONS FROM THIS SKILL</span>{answer.followUpQuestions?.map((followUp: string) => <button key={followUp} onClick={() => { setQuestion(followUp); ask(followUp); }}>{followUp}<ChevronRight size={12} /></button>)}</div></div>}</div>;
-}
-
-function AiAdminPanel({ onRun }: { onRun: (label: string) => void }) {
-  const [provider, setProvider] = useState("openai");
-  const [key, setKey] = useState("");
-  const [status, setStatus] = useState<any>(null);
-  useEffect(() => { fetch("/api/ai/status").then((response) => response.json()).then(setStatus); }, []);
-  const configure = async () => { const result = await fetch("/api/ai/config", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ provider, key }) }).then((response) => response.json()); setStatus(result.status ?? result); setKey(""); onRun(result.ok ? `${provider} provider status updated · key not displayed` : "Provider key validation failed"); };
-  return <div className="ai-admin-panel"><div className="panel-head"><div><SectionKicker icon={LockKeyhole}>AI provider administration</SectionKicker><h2>Show exactly where generative AI enters the system.</h2><p>The demo uses deterministic grounded answers unless a provider is configured. Production keys belong in a secret manager, never browser storage.</p></div><Badge tone={status?.keyStored ? "green" : "amber"}>{status?.keyStored ? `${status.provider} configured` : "Demo grounded"}</Badge></div><div className="ai-admin-grid"><div className="ai-status-card"><span className="tiny-label">CURRENT MODE</span><strong>{status?.mode ?? "Checking…"}</strong><small>{status?.note ?? "Loading provider status"}</small><div className="ai-uses">{(status?.usedFor ?? ["graph questions", "finding insights", "report drafting"]).map((item: string) => <Badge key={item} tone="cyan" subtle>{item}</Badge>)}</div></div><div className="ai-config-form"><label>Provider<select value={provider} onChange={(event) => setProvider(event.target.value)}><option value="openai">OpenAI-compatible</option><option value="anthropic">Anthropic</option></select></label><label>API key or secret reference<input type="password" value={key} onChange={(event) => setKey(event.target.value)} placeholder="sk-… or secret://…" /></label><button className="primary-button" onClick={configure} disabled={!key}><LockKeyhole size={14} />Configure provider</button></div></div><div className="ai-boundary"><span><CircleCheck size={13} />Grounding sources: graph + temporal events + evidence + Part 21 pack</span><span><UserRoundCheck size={13} />Human gate: required before report, finding, or notification action</span></div></div>;
-}
-
-function ExcelAdminPanel({ onRun }: { onRun: (label: string) => void }) {
-  const [status, setStatus] = useState<any>(null);
-  const [samples, setSamples] = useState<any[]>([]);
-  const [uploadResult, setUploadResult] = useState<any>(null);
-  const [busy, setBusy] = useState(false);
-  const load = () => { fetch("/api/admin/excel/status").then((response) => response.json()).then(setStatus); fetch("/api/admin/excel/samples").then((response) => response.json()).then((payload) => setSamples(payload.samples ?? [])); };
-  useEffect(() => { load(); }, []);
-  const upload = (file: File) => { setBusy(true); const reader = new FileReader(); reader.onload = async () => { const base64 = String(reader.result ?? ""); const result = await fetch("/api/admin/excel/upload", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ filename: file.name, base64, actor: "Jordan Lewis", source: "Admin workbook intake" }) }).then((response) => response.json()); setUploadResult(result); setBusy(false); setStatus(result.adapter ?? status); onRun(result.ok ? `Workbook parsed · ${result.snapshot.sheets.length} sheets · human import required` : `Workbook intake blocked · ${result.error}`); }; reader.readAsDataURL(file); };
-  return <section className="admin-excel-panel"><div className="panel-head"><div><SectionKicker icon={FileUp}>Excel / workbook adapter</SectionKicker><h2>Simulate supplier and audit data safely</h2><p>Download a synthetic workbook, edit it in Excel, then upload it to see workbook revisions, changed rows, and a human-gated graph import proposal.</p></div><Badge tone={status?.liveMcpConnection ? "green" : "amber"}>{status?.liveMcpConnection ? "Live Excel MCP" : "MCP-style demo adapter"}</Badge></div><div className="admin-boundary"><div><span className="tiny-label">CURRENT CONNECTION</span><strong>{status?.provider ?? "Checking…"}</strong><small>{status?.productionTarget ?? "Client-hosted Excel MCP can replace this boundary."}</small></div><div><span className="tiny-label">SAFETY</span><strong>Approval persists a durable overlay</strong><small>Promotion into authoritative graph entities remains human and ontology gated.</small></div></div><div className="admin-excel-grid"><div><span className="tiny-label">DOWNLOAD SAMPLE FILES</span><div className="sample-file-list">{samples.map((sample) => <a className="sample-file" key={sample.id} href={sample.href} download><span><Download size={14} /><strong>{sample.name}</strong><small>{sample.purpose}</small></span><ArrowDownRight size={13} /></a>)}</div></div><div className="upload-dropzone"><FileUp size={20} /><strong>Upload a revised workbook</strong><p>Accepted: .xlsx, .xlsm, .xltx. The adapter reads sheets and returns a revision hash.</p><label className="primary-button">{busy ? "Parsing…" : "Choose workbook"}<input type="file" accept=".xlsx,.xlsm,.xltx" hidden disabled={busy} onChange={(event) => { const file = event.target.files?.[0]; if (file) upload(file); }} /></label></div></div>{uploadResult?.snapshot && <div className="workbook-result"><div className="workbook-result-head"><div><span className="tiny-label">REVISION PROPOSAL</span><strong>{uploadResult.snapshot.name}</strong><small>SHA-256 {uploadResult.snapshot.sha256.slice(0, 18)}… · {uploadResult.snapshot.sizeBytes.toLocaleString()} bytes · {uploadResult.snapshot.importedAt}</small></div><Badge tone="amber">Human review required</Badge></div><div className="workbook-sheets">{uploadResult.snapshot.sheets.map((sheet: any) => <span key={sheet.name}><strong>{sheet.name}</strong>{sheet.rows} rows · {sheet.columns} columns</span>)}</div><div className="workbook-diff"><span className="tiny-label">MCP DIFF RESULT</span><strong>{uploadResult.diff?.status}</strong><small>{uploadResult.diff?.changed?.length ?? 0} changed sheet/sample groups. Approve only after checking provenance and audit scope.</small></div><div className="workbook-actions"><button className="primary-button" onClick={() => onRun("Workbook import approved · durable bitemporal overlay persisted")}>Approve overlay import</button><button className="ghost-button" onClick={() => downloadJson("part21-workbook-revision.json", uploadResult)}>Download revision JSON</button></div></div>}</section>;
-}
-
-function ConnectorRegistry() {
-  const connectors = [{ name: "Excel / local directory", id: "excel-local-directory", status: "connected", detail: "EXCEL_ROOT · Streamable HTTP + stdio" }, { name: "SAP ERP", id: "sap-erp", status: "configure later", detail: "MCP or OData · supplier, procurement, material master" }, { name: "Salesforce supplier relationship", id: "salesforce-supplier", status: "configure later", detail: "MCP or REST · vendor contacts and notifications" }, { name: "Document control repository", id: "document-control", status: "configure later", detail: "MCP or REST · controlled procedures and revisions" }, { name: "Configuration management", id: "configuration-management", status: "configure later", detail: "MCP or API · baselines, changes, effective dates" }];
-  return <section className="connector-registry"><div className="connector-registry-head"><div><span className="tiny-label">CONNECTOR REGISTRY</span><strong>Source systems ready to configure</strong></div><Badge tone="blue">MCP boundary</Badge></div><div className="connector-registry-list">{connectors.map((connector) => <div className="connector-row" key={connector.id}><span className={`connector-dot ${connector.status === "connected" ? "online" : "planned"}`} /><div><strong>{connector.name}</strong><small>{connector.detail}</small></div><Badge tone={connector.status === "connected" ? "green" : "blue"} subtle>{connector.status}</Badge></div>)}</div></section>;
-}
-
-function WeeklySyncPanel({ onRun }: { onRun: (label: string) => void }) {
-  const [result, setResult] = useState<any>(null);
-  const [running, setRunning] = useState(false);
-  const run = async () => { setRunning(true); const response = await fetch("/api/sync/weekly", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ actor: "Jordan Lewis" }) }); const payload = await response.json(); setResult(payload); setRunning(false); onRun(`Weekly source sync complete · ${payload.workbookSync.filesChecked} workbook(s) checked`); };
-  return <section className="weekly-sync-panel"><div><span className="tiny-label">SCHEDULED COMPLIANCE</span><h3>Weekly source synchronization</h3><p>Idempotently checks changed workbooks, readiness, Part 21 policy coverage, and connector status. Unconfigured ERP sources remain visibly pending.</p></div><button className="primary-button" onClick={run} disabled={running}><RefreshCw size={14} className={running ? "spin" : ""} />{running ? "Running…" : "Run weekly sync now"}</button>{result && <div className="weekly-sync-result"><div><strong>{result.workbookSync.results.filter((item: any) => item.status !== "unchanged").length} changed</strong><small>workbook revisions</small></div><div><strong>{result.pendingConnectorSetup.length} pending</strong><small>enterprise connectors</small></div><div><strong>{result.complianceChecks.policyCoverage.coveragePercent ?? result.complianceChecks.policyCoverage.coverage ?? "—"}</strong><small>policy coverage</small></div><button className="ghost-button" onClick={() => downloadJson("part21-weekly-sync.json", result)}>Download result JSON</button></div>}</section>;
-}
-
-function DocumentControlView({ onRun }: { onRun: (label: string) => void }) {
-  const [documents, setDocuments] = useState<any[]>([]);
-  const [status, setStatus] = useState<any>(null);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [notarization, setNotarization] = useState<any>(null);
-  const [part21Decision, setPart21Decision] = useState<any>(null);
-  const load = () => { fetch("/api/documents?auditId=AUD-026").then((response) => response.json()).then((payload) => { setDocuments(payload.documents ?? []); if (!selectedId && payload.documents?.[0]) setSelectedId(payload.documents[0].id); }); fetch("/api/document-control/status").then((response) => response.json()).then(setStatus); };
-  useEffect(() => { load(); }, []);
-  const selected = documents.find((document) => document.id === selectedId) ?? documents[0];
-  const upload = async (file: File) => { const reader = new FileReader(); reader.onload = async () => { const result = await fetch("/api/documents", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ title: file.name, documentNumber: `UP-${file.name.split(".")[0].toUpperCase()}`, revision: "A", mimeType: file.type || "application/octet-stream", base64: String(reader.result ?? ""), auditIds: ["AUD-026"], tags: ["uploaded", "audit-evidence"], actor: "Jordan Lewis" }) }).then((response) => response.json()); if (result.document) { setSelectedId(result.document.id); onRun(`${result.document.id} stored · cybersecurity review required`); load(); } }; reader.readAsDataURL(file); };
-  const review = async () => { if (!selected) return; const result = await fetch(`/api/documents/${selected.id}/cybersecurity-review`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ reviewer: "Security & Quality", status: "reviewed", note: "Access, integrity, malware, and least-privilege controls reviewed." }) }).then((response) => response.json()); setDocuments((current) => current.map((document) => document.id === selected.id ? result.document : document)); onRun(`${selected.id} cybersecurity review recorded`); };
-  const notarize = async () => { if (!selected) return; const result = await fetch(`/api/documents/${selected.id}/notarize`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ actor: "Quality approver" }) }).then((response) => response.json()); setNotarization(result); setDocuments((current) => current.map((document) => document.id === selected.id ? result.document : document)); onRun(`${selected.id} received simulated Hedera notarization hash`); };
-  const generateDecision = async () => { if (!selected) return; const result = await fetch(`/api/documents/${selected.id}/part21-decision`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ actor: "Part 21 review agent" }) }).then((response) => response.json()); setPart21Decision(result); onRun(`${selected.id} synthetic Part 21 applicability decision generated · human determination required`); };
-  return <div className="view-stack document-control-view"><div className="view-title-row"><div><SectionKicker icon={FileSearch}>Document control</SectionKicker><h1>Store the record. Control the revision. Prove the hash.</h1><p>Controlled documents are stored with revision identity, retention policy, cybersecurity review, audit linkage, and a demonstrable notarization trail.</p></div><div className="view-actions"><Badge tone="green">{status?.status ?? "Loading"}</Badge><label className="primary-button"><FileUp size={14} />Upload controlled document<input type="file" hidden onChange={(event) => { const file = event.target.files?.[0]; if (file) upload(file); }} /></label></div></div><div className="document-control-strip"><div><span className="tiny-label">REPOSITORY</span><strong>{status?.storage ?? "Durable file store + event ledger"}</strong></div><div><span className="tiny-label">RETENTION</span><strong>10-year QA record policy</strong></div><div><span className="tiny-label">CYBER REVIEW</span><strong>Access · malware · integrity · least privilege</strong></div><div><span className="tiny-label">NOTARIZATION</span><strong>Hedera testnet example · simulated</strong></div></div><div className="document-control-grid"><section className="panel document-list-panel"><div className="panel-head"><div><SectionKicker icon={FileCheck2}>Controlled record register</SectionKicker><h2>{documents.length} documents linked to AUD-026</h2><p>Click a record to inspect its revision, retention, cyber review, and notarization state.</p></div><button className="icon-button" onClick={load}><RefreshCw size={15} /></button></div><div className="controlled-document-list">{documents.map((document) => <button className={`controlled-document-row ${document.id === selected?.id ? "active" : ""}`} key={document.id} onClick={() => { setSelectedId(document.id); setNotarization(document.notarization ? { notarization: document.notarization } : null); }}><span className="document-row-icon"><FileCheck2 size={15} /></span><span><strong>{document.title}</strong><small>{document.documentNumber} · Rev {document.revision} · {document.sizeBytes} bytes</small></span><Badge tone={document.cybersecurity.status === "reviewed" ? "green" : "amber"} subtle>{document.cybersecurity.status === "reviewed" ? "cyber reviewed" : "review needed"}</Badge><ChevronRight size={14} /></button>)}</div></section><section className="panel document-detail-panel">{selected ? <><div className="panel-head"><div><SectionKicker icon={LockKeyhole}>Selected controlled record</SectionKicker><h2>{selected.title}</h2><p>{selected.documentNumber} · revision {selected.revision} · linked to {selected.auditIds.join(", ")}</p></div><Badge tone={selected.status === "controlled" ? "green" : "amber"}>{selected.status}</Badge></div><div className="document-detail-grid"><div><span className="tiny-label">INTEGRITY</span><code>{selected.sha256}</code><small>SHA-256 content hash · {selected.sizeBytes} bytes</small></div><div><span className="tiny-label">RETENTION</span><strong>{selected.retention.policy}</strong><small>Retain until {selected.retention.retainUntil} · legal hold: {selected.retention.legalHold ? "yes" : "no"}</small></div><div><span className="tiny-label">CYBERSECURITY</span><strong>{selected.cybersecurity.status}</strong><small>{selected.cybersecurity.controls.join(" · ") || "Review required before controlled status"}</small></div><div><span className="tiny-label">SOURCE</span><strong>{selected.source}</strong><small>Received {selected.receivedAt} · effective {selected.effectiveDate}</small></div></div><div className="document-actions"><button className="ghost-button" onClick={review} disabled={selected.cybersecurity.status === "reviewed"}><ShieldCheck size={14} />{selected.cybersecurity.status === "reviewed" ? "Cyber reviewed" : "Complete cyber review"}</button><button className="primary-button" onClick={notarize}><Link2 size={14} />{selected.notarization ? "Refresh hash proof" : "Create Hedera demo proof"}</button><button className="ghost-button" onClick={generateDecision}><ShieldAlert size={14} />Generate synthetic Part 21 decision</button></div>{part21Decision && <div className="part21-decision-card"><div className="notarization-head"><div><span className="tiny-label">FINAL PART 21 APPLICABILITY / REPORTABILITY</span><strong>Synthetic decision · {part21Decision.decision?.decisionId}</strong></div><Badge tone="amber">HUMAN DETERMINATION REQUIRED</Badge></div><div className="part21-decision-grid"><div><span>Applicability</span><strong>{part21Decision.decision?.applicability?.outcome}</strong><small>Confidence {Math.round((part21Decision.decision?.applicability?.confidence ?? 0) * 100)}% · {part21Decision.decision?.applicability?.basis?.join(" · ")}</small></div><div><span>Reportability</span><strong>{part21Decision.decision?.reportability?.outcome}</strong><small>{part21Decision.decision?.reportability?.rationale}</small></div></div><div className="decision-next-step"><Sparkles size={14} /><span><b>Recommended next step:</b> {part21Decision.decision?.reportability?.recommendedNextStep}</span></div><div className="drawer-chip-row">{(part21Decision.decision?.humanGates ?? []).map((gate: string) => <Badge key={gate} tone="cyan" subtle>{gate}</Badge>)}</div><small className="decision-warning">{part21Decision.decision?.warning}</small></div>}{notarization && <div className="notarization-card"><div className="notarization-head"><div><span className="tiny-label">BLOCKCHAIN-STYLE NOTARIZATION</span><strong>Hedera · {notarization.notarization?.network ?? selected.notarization?.network}</strong></div><Badge tone="amber">SIMULATED</Badge></div><div className="notarization-grid"><div><span>Topic ID</span><code>{notarization.notarization?.topicId ?? selected.notarization?.topicId}</code></div><div><span>Transaction ID</span><code>{notarization.notarization?.transactionId ?? selected.notarization?.transactionId}</code></div><div><span>Message hash</span><code>{notarization.notarization?.messageHash ?? selected.notarization?.messageHash}</code></div><div><span>Payload hash</span><code>{notarization.notarization?.payloadHash ?? selected.notarization?.payloadHash}</code></div></div><details><summary>Show canonical notarization payload</summary><pre>{JSON.stringify(notarization.canonicalPayload ?? { documentId: selected.id, sha256: selected.sha256, revision: selected.revision }, null, 2)}</pre></details><small>This demonstration does not submit a real Hedera transaction. In production, submit the canonical payload through a qualified Hedera account and retain the receipt in the immutable event ledger.</small></div>}</> : <div className="empty-state"><FileSearch size={20} /><strong>No controlled document selected</strong><p>Upload a controlled document or select a seeded record.</p></div>}</section></div></div>;
-}
-
-function AdminPanel({ onRun }: { onRun: (label: string) => void }) {
-  return <div className="admin-panel"><div className="admin-panel-intro"><SectionKicker icon={LockKeyhole}>Administration</SectionKicker><h2>Operate the boundaries without cluttering the audit workspace.</h2><p>Provider settings, workbook adapters, sample data, and connection status live here. Normal audit work stays focused on evidence, findings, graph, skills, and accountable decisions.</p></div><AiAdminPanel onRun={onRun} /><WeeklySyncPanel onRun={onRun} /><ConnectorRegistry /><ExcelAdminPanel onRun={onRun} /><div className="admin-honesty"><CircleCheck size={14} /><span>Local Excel MCP access is active through `EXCEL_ROOT`. Approved revisions persist as a durable bitemporal workbook overlay; promotion into authoritative client graph entities remains a qualified ontology-mapping step.</span></div></div>;
-}
-
-function AppHeader({ view, onNavigate, onRun, onOpenDrawer, onCloseDrawer, activeAudit }: { view: ViewId; onNavigate: (view: ViewId) => void; onRun: (label: string) => void; onOpenDrawer: (model: DrawerModel) => void; onCloseDrawer: () => void; activeAudit: AuditRecord }) {
-  const current = navItems.find((item) => item.id === view) ?? navItems[0];
-  return <header className="app-header"><div className="breadcrumbs"><span>ASSURANCE OS</span><ChevronRight size={13} /><strong>{current.label}</strong><span className="header-audit-context">{activeAudit.id} · {activeAudit.title}</span></div><div className="header-actions"><button className="header-search header-search-button" onClick={() => onOpenDrawer({ eyebrow: "GENERATIVE ASSURANCE", title: "Ask the graph", subtitle: "Grounded questions across evidence, temporal events, agents, and Part 21", icon: Sparkles, content: <GroundedChat onRun={onRun} /> })}><Search size={14} /><span>Ask the graph or jump to a record</span><kbd>⌘ K</kbd></button><button className="header-status" onClick={() => onNavigate("data")}><StatusDot tone="green" pulse />5 sources healthy</button><button className="header-alert" onClick={() => onOpenDrawer({ eyebrow: "ALERT CENTER", title: "4 review items need attention", subtitle: "Every alert links to an affected record or agent recommendation", icon: Inbox, content: <div className="alert-list"><button className="alert-row alert-red" onClick={() => { onCloseDrawer(); onNavigate("audit"); }}><StatusDot tone="red" pulse /><span><strong>F-042 · Heat-lot chain unresolved</strong><small>Open the AUD-026 evidence chain and draft a finding.</small></span><ChevronRight size={14} /></button><button className="alert-row alert-amber" onClick={() => { onCloseDrawer(); onNavigate("graph"); }}><StatusDot tone="amber" /><span><strong>CHG-014 · Impact review due</strong><small>Two evidence records require revalidation against the new baseline.</small></span><ChevronRight size={14} /></button><button className="alert-row alert-blue" onClick={() => { onCloseDrawer(); onNavigate("evidence"); }}><StatusDot tone="blue" /><span><strong>EV-803 · Evidence confidence 71%</strong><small>Receiving inspection cannot be joined to heat-lot certificate.</small></span><ChevronRight size={14} /></button><button className="alert-row alert-green" onClick={() => { onCloseDrawer(); onNavigate("agents"); }}><StatusDot tone="green" /><span><strong>Readiness facilitator · recommendation ready</strong><small>Four agent recommendations are awaiting review.</small></span><ChevronRight size={14} /></button></div> })}><Inbox size={16} /><span>4</span></button><div className="avatar avatar-cream">JL</div></div></header>;
-}
-
-export default function Home() {
-  const [view, setView] = useState<ViewId>("overview");
-  const [configReady, setConfigReady] = useState(false);
-  const [toast, setToast] = useState<string | null>(null);
-  const [drawer, setDrawer] = useState<DrawerModel | null>(null);
-  const [mcpConnected, setMcpConnected] = useState(false);
-  const [session, setSession] = useState<{ persona: AssurancePersona; audit: AuditRecord } | null>(null);
-  const [auditPortfolio, setAuditPortfolio] = useState<AuditRecord[]>([]);
-  const [portfolio, setPortfolio] = useState<DatabasePortfolio | null>(null);
-
-  useEffect(() => {
-    loadControlledConfiguration().then(() => setConfigReady(true)).catch(() => setConfigReady(false));
-  }, []);
-
-  useEffect(() => {
-    fetch("/api/mcp/tools").then((response) => response.ok ? response.json() : Promise.reject(new Error("MCP unavailable"))).then(() => setMcpConnected(true)).catch(() => setMcpConnected(false));
-    fetch("/api/domain/audits").then((response) => response.json()).then(async (data) => { const rows = (data.audits ?? []) as AuditRecord[]; setAuditPortfolio(rows); const auditId = rows[0]?.id; if (!auditId) throw new Error("No database audits available"); const portfolioResponse = await fetch(`/api/domain/portfolio?auditId=${encodeURIComponent(auditId)}`); const portfolioData = await portfolioResponse.json(); if (portfolioData.source === "mysql-database") setPortfolio(portfolioData); }).catch(() => undefined);
-  }, []);
-
-  const run = (label: string) => {
-    setToast(label);
-    window.setTimeout(() => setToast(null), 3200);
-  };
-
-  const activeAudit = session?.audit ?? portfolio?.audit ?? auditPortfolio[0];
-
-  const page = useMemo(() => {
-    if (view === "overview") return <Overview activeAudit={activeAudit} persona={session?.persona ?? assurancePersonas[0]} portfolio={portfolio!} onNavigate={setView} onOpenDrawer={setDrawer} />;
-    if (view === "audit") return <AuditView onRun={run} onOpenDrawer={setDrawer} />;
-    if (view === "graph") return <GraphView activeAudit={activeAudit} onRun={run} onOpenDrawer={setDrawer} />;
-    if (view === "evidence") return <EvidenceView onRun={run} onOpenDrawer={setDrawer} />;
-    if (view === "documents") return <DocumentControlView onRun={run} />;
-    if (view === "controls") return <ControlView onRun={run} />;
-    if (view === "skills") return <SkillsView onRun={run} />;
-    if (view === "policy") return <PolicyAsCodeView onRun={run} />;
-    if (view === "governance") return <GovernanceView onRun={run} />;
-    if (view === "regulatory") return <RegulatoryTraceView onRun={run} />;
-    if (view === "roles") return <RolesView onRun={run} />;
-    if (view === "agents") return <AgentObservabilityView onRun={run} />;
-    return <DataView onRun={run} connected={mcpConnected} />;
-  }, [activeAudit, mcpConnected, view]);
-
-  if (!configReady || !auditPortfolio.length || !portfolio || !activeAudit) return <div className="launch-shell"><main className="launch-content"><div className="launch-panel"><span className="tiny-label">DATABASE INITIALIZATION</span><h1>Loading controlled configuration and audit portfolio…</h1><p>The assurance cockpit will not enter demo mode. It requires the MySQL configuration, audit, and graph stores to be available.</p></div></main></div>;
-  if (!session) return <LaunchWorkspace initialAudits={auditPortfolio} onEnter={(persona, audit, auditList) => { setAuditPortfolio(auditList); setSession({ persona, audit }); setView(persona.defaultView); }} />;
-
-  return <div className="app-shell"><aside className="sidebar"><div className="brand"><div className="brand-mark"><span /><span /><span /></div><div><strong>PART 21</strong><small>ASSURANCE OS</small></div></div><button className="workspace-switcher" onClick={() => setDrawer({ eyebrow: "AUDIT PORTFOLIO", title: "Switch active audit", subtitle: "Select another audit without leaving the assurance system", icon: ClipboardCheck, content: <AuditSwitchPanel activeAudit={session.audit} auditList={auditPortfolio} onSelect={(audit) => { setSession({ ...session, audit }); setDrawer(null); run(`${audit.id} loaded · audit context switched`); }} /> })}><div className="workspace-dot"><MapPin size={13} /></div><div><span>WORKSPACE</span><strong>{session.audit.scope}</strong><small>AUDIT {session.audit.id}</small></div><ChevronRight size={14} /></button><nav className="side-nav">{navGroups.map((group) => <div className="nav-group" key={group.label}><span className="nav-heading">{group.label}</span>{group.items.map((id) => { const item = navItems.find((candidate) => candidate.id === id)!; const Icon = item.icon; return <button key={item.id} className={`nav-item ${view === item.id ? "active" : ""}`} onClick={() => setView(item.id)}><Icon size={16} /><span>{item.label}</span>{item.count && <em>{item.count}</em>}</button>; })}</div>)}</nav><div className="side-bottom"><div className="environment-card"><div className="environment-top"><StatusDot tone="amber" pulse /><span>DEMO ENVIRONMENT</span></div><p>Synthetic data is active. Connect client adapters when ready.</p><button onClick={() => setView("data")}>View data plane <ArrowUpRight size={13} /></button></div><button className="side-user" onClick={() => setDrawer({ eyebrow: "ADMINISTRATION", title: "AI provider and grounding", subtitle: "Configure the provider boundary and inspect what powers advice", icon: LockKeyhole, content: <AdminPanel onRun={run} /> })}><div className="avatar avatar-cream">JL</div><div><strong>Jordan Lewis</strong><small>{session.persona.title} · AI settings</small></div><SlidersHorizontal size={14} /></button></div></aside><div className="app-main"><AppHeader view={view} activeAudit={session.audit} onNavigate={setView} onRun={run} onOpenDrawer={setDrawer} onCloseDrawer={() => setDrawer(null)} /><main className="main-content"><div className="content-heading"><div><div className="eyebrow"><StatusDot tone="green" pulse />SYSTEM PULSE <span>·</span> {agentPulse.lastRun}</div><h1>{view === "overview" ? (session.persona.id === "manager" ? "Know what changed. Know why." : session.persona.id === "auditor" ? "Prove the conclusion. Preserve the trace." : `Operate from the ${session.persona.title.toLowerCase()} lens.`) : navItems.find((item) => item.id === view)?.label}</h1><p>{view === "overview" ? `${session.persona.description} Active audit: ${session.audit.id} · ${session.audit.title}.` : `A connected view of assurance evidence, controls, and accountable action for the ${session.persona.title.toLowerCase()}.`}</p></div><div className="heading-actions"><button className="secondary-button" onClick={() => run("Monitoring heartbeat received · 5 adapters responding")}><Activity size={15} />Monitoring live</button><button className="primary-button" onClick={() => setDrawer({ eyebrow: "GENERATIVE ASSURANCE", title: "Ask the graph", subtitle: "Grounded questions across evidence, temporal events, agents, and Part 21", icon: Sparkles, content: <GroundedChat onRun={run} /> })}><Sparkles size={15} />Ask the agents</button></div></div>{page}</main><AgentRail onRun={run} />{toast && <div className="toast"><span className="toast-check"><Check size={13} /></span><span>{toast}</span><button onClick={() => setToast(null)}><X size={13} /></button></div>}{drawer && <DetailDrawer model={drawer} onClose={() => setDrawer(null)} />}</div></div>;
 }

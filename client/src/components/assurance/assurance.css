@@ -1,0 +1,445 @@
+/* Live assurance workspace additions. Reuses the existing dark audit visual language. */
+.assurance-shell .app-main {
+  min-width: 0;
+}
+.assurance-shell .side-user > div:only-child {
+  flex: 1;
+  min-width: 0;
+}
+.assurance-shell .side-user .text-button {
+  margin-top: 5px;
+  padding: 0;
+  font-size: 9px;
+}
+.assurance-shell .side-nav {
+  overflow-y: auto;
+  padding-right: 2px;
+}
+.launch-start-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+@media (min-width: 1430px) {
+  .assurance-shell .app-main {
+    padding-right: 0;
+  }
+  .assurance-shell .app-header {
+    padding-right: 31px;
+  }
+}
+.assurance-context-bar {
+  display: flex;
+  align-items: end;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 22px;
+  padding: 12px 14px;
+  border: 1px solid #1d354a;
+  border-radius: 8px;
+  background: #0d1a27;
+}
+.assurance-context-bar label {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 170px;
+  color: #7e94aa;
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.assurance-context-bar select {
+  min-height: 33px;
+  padding: 0 9px;
+  border: 1px solid #29465e;
+  border-radius: 6px;
+  color: #dceaf4;
+  background: #0a1724;
+  font-size: 11px;
+}
+.assurance-context-bar > div {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-left: auto;
+  min-width: 250px;
+}
+.assurance-context-bar > div strong {
+  color: #e5f1f8;
+  font-size: 11px;
+  font-weight: 600;
+}
+.assurance-context-bar > div small {
+  color: #7990a6;
+  font-size: 9px;
+}
+.assurance-panel {
+  padding: 19px 20px;
+}
+.assurance-badge {
+  color: #65dce7 !important;
+  border-color: #2d6975 !important;
+  background: #102a37 !important;
+}
+.assurance-empty {
+  margin-top: 12px;
+  padding: 12px;
+  border: 1px dashed #29445a;
+  border-radius: 7px;
+  color: #7e95a9;
+  background: #0b1723;
+  font-size: 10px;
+  line-height: 1.5;
+}
+.assurance-error {
+  margin-top: 9px;
+  padding: 10px 11px;
+  border: 1px solid #7e3d45;
+  border-left: 3px solid #ef7077;
+  border-radius: 5px;
+  color: #ffd8d9;
+  background: #2a1920;
+  font-size: 10px;
+  line-height: 1.5;
+}
+.assurance-form {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 12px;
+  padding: 12px;
+  border: 1px solid #1f3a50;
+  border-radius: 7px;
+  background: #0b1825;
+}
+.assurance-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  color: #9eb3c7;
+  font-size: 10px;
+}
+.assurance-form input,
+.assurance-form textarea,
+.assurance-form select {
+  width: 100%;
+  box-sizing: border-box;
+  min-height: 34px;
+  padding: 8px 9px;
+  border: 1px solid #29475f;
+  border-radius: 5px;
+  color: #e5f1f8;
+  background: #081521;
+  font: inherit;
+  font-size: 11px;
+}
+.assurance-form textarea {
+  resize: vertical;
+  line-height: 1.45;
+}
+.assurance-form small {
+  color: #71899f;
+  font-size: 9px;
+  line-height: 1.5;
+}
+.assurance-form input[type="checkbox"] {
+  width: auto;
+  min-height: 0;
+}
+.assurance-query-form {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  align-items: end;
+}
+.assurance-document-form {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  align-items: end;
+}
+.assurance-document-form button {
+  min-height: 34px;
+}
+.assurance-inline {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+  color: #7e95a9;
+  font-size: 9px;
+}
+.assurance-record-list {
+  display: flex;
+  flex-direction: column;
+  margin-top: 12px;
+}
+.assurance-record-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  padding: 11px 2px;
+  border-top: 1px solid #1a3044;
+  color: #d8e7f0;
+  background: transparent;
+  text-align: left;
+}
+.assurance-record-row:hover strong {
+  color: #6fe1eb;
+}
+.assurance-record-row > span {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+.assurance-record-row strong {
+  overflow: hidden;
+  color: #d8e7f0;
+  font-size: 10px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.assurance-record-row small {
+  overflow: hidden;
+  color: #71889f;
+  font-size: 9px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.assurance-record-row .badge {
+  flex: 0 0 auto;
+}
+.assurance-event {
+  display: flex;
+  gap: 8px;
+  width: 100%;
+  padding: 10px 0;
+  border-top: 1px solid #1a3044;
+  color: #8ba2b6;
+  background: transparent;
+  text-align: left;
+}
+.assurance-event:hover strong {
+  color: #6fe1eb;
+}
+.assurance-event > span {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.assurance-event strong {
+  color: #d7e5ee;
+  font-size: 10px;
+}
+.assurance-event small {
+  color: #72899f;
+  font-size: 9px;
+}
+.assurance-live-graph {
+  min-height: 300px;
+}
+.assurance-live-graph svg {
+  min-height: 300px;
+}
+.assurance-phase-flow {
+  display: flex;
+  align-items: stretch;
+  gap: 6px;
+  margin-top: 14px;
+  overflow-x: auto;
+  padding-bottom: 4px;
+}
+.assurance-phase-unit {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 170px;
+}
+.assurance-phase {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  width: 100%;
+  min-height: 100px;
+  padding: 10px;
+  border: 1px solid #244157;
+  border-radius: 7px;
+  color: #b8cada;
+  background: #0d1c2a;
+  text-align: left;
+}
+.assurance-phase.active {
+  border-color: #4b9eab;
+  background: #12303d;
+}
+.assurance-phase strong {
+  color: #e5f2f8;
+  font-size: 11px;
+}
+.assurance-phase small,
+.assurance-phase span {
+  color: #7991a7;
+  font-size: 9px;
+  line-height: 1.4;
+}
+.assurance-phase-arrow {
+  color: #45667e;
+  font-family: "IBM Plex Mono", monospace;
+}
+.assurance-approval {
+  margin-top: 12px;
+  padding: 12px;
+  border: 1px solid #244157;
+  border-radius: 7px;
+  background: #0d1b29;
+}
+.assurance-approval p {
+  margin: 6px 0;
+  color: #a9bdcd;
+  font-size: 10px;
+  line-height: 1.45;
+}
+.assurance-approval small {
+  display: block;
+  margin-top: 6px;
+  color: #7890a6;
+  font-size: 9px;
+  line-height: 1.45;
+}
+.assurance-approval .primary-button {
+  margin-top: 8px;
+}
+.assurance-response {
+  margin: 10px 0;
+  color: #d7e7f1;
+  font-size: 11px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+}
+.assurance-inspector {
+  width: min(680px, 96vw) !important;
+  max-width: 680px !important;
+  overflow-y: auto;
+  background: #0c1825 !important;
+}
+.assurance-inspector-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 0 4px 20px;
+}
+.assurance-inspector-body h3 {
+  margin: 12px 0 0;
+  color: #e3f0f7;
+  font-size: 13px;
+}
+.assurance-inspector-body .draft-preview {
+  margin-top: 8px;
+}
+.assurance-recording {
+  color: #ffd0d2 !important;
+  border-color: #a44f58 !important;
+  background: #3a1d24 !important;
+}
+.assurance-checklist {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 6px;
+  border: 1px solid #29475f;
+  border-radius: 5px;
+  background: #081521;
+}
+.assurance-checklist label {
+  flex-direction: row;
+  align-items: center;
+  gap: 7px;
+}
+.assurance-login {
+  max-width: 680px;
+}
+.assurance-login .panel {
+  padding: 24px;
+}
+.assurance-login .panel > svg {
+  color: #64dbe5;
+  margin-bottom: 12px;
+}
+.assurance-login p {
+  color: #8ea5b9;
+  font-size: 11px;
+  line-height: 1.55;
+}
+.assurance-launch-actions {
+  position: fixed;
+  top: 22px;
+  right: 24px;
+  z-index: 5;
+  display: flex;
+  gap: 7px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+.assurance-scope-notice {
+  max-width: 900px;
+  margin: 12px auto;
+  padding: 12px 15px;
+  border: 1px solid #6b4f31;
+  border-radius: 6px;
+  color: #e7c58f;
+  background: #211b16;
+  font-size: 10px;
+  line-height: 1.5;
+}
+.assurance-login .assurance-inline {
+  margin-top: 16px;
+}
+.assurance-login .primary-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+.assurance-live-graph .graph-node:focus circle {
+  stroke-width: 3;
+}
+.assurance-live-graph g[role="button"] {
+  cursor: pointer;
+}
+.assurance-live-graph g[role="button"]:focus {
+  outline: none;
+}
+@media (max-width: 900px) {
+  .assurance-context-bar > div {
+    margin-left: 0;
+    min-width: 100%;
+  }
+  .assurance-context-bar label {
+    min-width: 140px;
+    flex: 1;
+  }
+  .assurance-launch-actions {
+    position: static;
+    padding: 14px;
+    justify-content: flex-start;
+  }
+  .assurance-inspector {
+    width: 100% !important;
+    max-width: 100% !important;
+  }
+  .assurance-document-form,
+  .assurance-query-form {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Part 21 clock and gate state tones */
+.assurance-badge-ok { border-color: #2f7d5a; color: #7fe0b0; }
+.assurance-badge-warn { border-color: #8a6a1f; color: #f0c265; }
+.assurance-badge-danger { border-color: #8c2f2f; color: #ff9b9b; }
+.assurance-badge-info { border-color: #2c5f7d; color: #8fd0ea; }
+.assurance-badge-muted { opacity: 0.7; }
+.assurance-note { font-size: 12px; opacity: 0.75; margin: 6px 0 10px; }
+.assurance-inline label { display: flex; flex-direction: column; gap: 4px; font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; }
+.assurance-inline input { background: transparent; border: 1px solid rgba(255,255,255,0.16); border-radius: 6px; padding: 6px 8px; color: inherit; font-size: 13px; min-width: 220px; }

@@ -1,185 +1,209 @@
 import crypto from "node:crypto";
 import type { AuditSkill, AuditSkillPhase } from "../shared/skills";
-import type { SimulationStep } from "../shared/execution";
-import { getEccCatalog } from "../shared/ecc";
-import { getDomainPortfolio, listAudits, upsertDomainRecord } from "./domain-store";
-import { getGroundedGraphContext } from "./graph-store";
-import { getControlledConfiguration, listControlledConfigurationPayloads } from "./config-store";
-import { promoteApprovedAuditToGraph, recordFinalizedGraphSnapshot } from "./graph-projection";
-import { appendAssuranceEvent } from "./event-store";
+import { createAgentServices, requireAgentScope, validateAgentGraph, type AgentServices, type AgentScope, type AgentGraph, type GovernedSkill, type AgentRunRecord, type AgentToolCall, type AgentRecord } from "./agent-runtime";
 
-export async function getAgentKitManifest() {
-  const [agents, skills, phases, connectors, ontology, regulatory, policy] = await Promise.all([
-    listControlledConfigurationPayloads<any>("agent_route"),
-    listControlledConfigurationPayloads<AuditSkill>("skill"),
-    getControlledConfiguration<any>("skill", "audit-phases"),
-    listControlledConfigurationPayloads<any>("connector"),
-    getControlledConfiguration<any>("ontology", "part21-assurance-ontology"),
-    getControlledConfiguration<any>("regulatory_source", "10-cfr-part-21"),
-    getControlledConfiguration<any>("policy", "part21-policy-as-code"),
-  ]);
-  return {
-    protocol: "agentkit-demo",
-    version: "0.1.0",
-    executionContract: { standard: "ECC-compatible open-source skill module", source: getEccCatalog().repository, localSkillPack: getEccCatalog().localPack },
-    agents: agents.map((item) => item.payload),
-    skills: skills.filter((item) => item.configId !== "audit-phases").map((item) => ({ ...(item.payload as any), questionCount: (item.payload as any).questions?.length ?? 0, configurationVersion: item.version, sourceSha256: item.sourceSha256 })),
-    phases: phases.payload,
-    connectors: connectors.map((item) => item.payload),
-    ontology: { id: ontology.payload.id, version: ontology.payload.version, temporalModel: ontology.payload.temporalModel, classCount: ontology.payload.classes.length, relationCount: ontology.payload.relations.length },
-    storage: { provider: "PostgreSQL", connectionEnv: "POSTGRES_URL", tables: ["ontology_entities", "ontology_relationships", "temporal_events", "audit_decisions"], syncEndpoint: "/api/ontology/sync" },
-    regulatoryPack: { id: regulatory.payload.id, title: regulatory.payload.title, sectionCount: regulatory.payload.sections.length, sources: regulatory.payload.sources, clientInterpretationRequired: true, configurationVersion: regulatory.version },
-    policyAsCode: { id: policy.payload.id, version: policy.payload.policyVersion, ruleCount: policy.payload.rules.length, sourceUri: policy.payload.sourceUri, configurationVersion: policy.version },
-  };
+export interface AuditSkillInput extends AgentScope {
+  skillId: string;
+  answers: Record<string, unknown>;
+  mode?: "runtime" | "preview";
+  skillVersion?: string;
+  evidenceBindings?: Record<string, string[]>;
+}
+export function hasSkillAnswer(value: unknown): boolean {
+  if (typeof value === "string") return value.trim().length > 0;
+  if (Array.isArray(value)) return value.length > 0 && value.every(hasSkillAnswer);
+  return typeof value === "boolean" || typeof value === "number" && Number.isFinite(value);
+}
+export function validateSkillAnswers(skill: AuditSkill, answers: Record<string, unknown>) {
+  const requirements = skill.questions.filter(question => question.required).map(question => {
+    const value = answers[question.id];
+    const valid = hasSkillAnswer(value) && (question.input !== "choice" || !question.options?.length || question.options.includes(String(value))) && (question.input !== "checklist" || Array.isArray(value) && (!question.options?.length || value.every(item => question.options!.includes(String(item)))));
+    return { id: question.id, answered: valid, prompt: question.prompt, evidenceHint: question.evidenceHint };
+  });
+  return { requirements, missing: requirements.filter(row => !row.answered), completion: requirements.length ? Math.round(100 * requirements.filter(row => row.answered).length / requirements.length) : 100 };
+}
+export function selectGovernedSkill(rows: GovernedSkill[], input: Pick<AuditSkillInput, "skillId" | "skillVersion" | "mode">) {
+  if (!input.skillId) throw new Error("The selected skillId is required; no first-skill fallback is allowed.");
+  const candidates = rows.filter(row => row.configId === input.skillId && (!input.skillVersion || row.version === input.skillVersion) && (input.mode === "preview" ? row.status !== "retired" : row.kind === "skill" && row.status === "active"));
+  if (candidates.length !== 1) throw new Error(candidates.length ? "Skill revision is ambiguous; select an exact governed version." : `Selected skill ${input.skillId} is not available in database configuration.`);
+  const row = candidates[0];
+  if (row.payload.id !== row.configId || !row.version || !/^[a-f0-9]{64}$/i.test(row.sourceSha256)) throw new Error("Skill revision/hash/identity is invalid.");
+  if (input.mode !== "preview" && (!row.approvedBy || !row.approvedAt || !row.approvalDecisionId || !row.governanceVerified)) throw new Error("Active skill has no qualified governance approval/activation proof; runtime execution blocked.");
+  return row;
 }
 
-export async function simulateFullAuditExecution(findingId?: string): Promise<{ finding: Record<string, unknown>; status: "completed"; steps: SimulationStep[] }> {
-  const audits = await listAudits();
-  let portfolio: any = null;
-  let selectedFinding: any = null;
-  for (const candidate of audits as any[]) {
-    const candidatePortfolio = await getDomainPortfolio(candidate.id);
-    for (const candidateFinding of candidatePortfolio.findings as any[]) {
-      if (findingId && candidateFinding.id !== findingId) continue;
-      try { await getGroundedGraphContext(candidateFinding.id); selectedFinding = candidateFinding; portfolio = candidatePortfolio; break; } catch { /* continue to the next persisted database finding */ }
-    }
-    if (selectedFinding) break;
+/** Explicit executable handlers. Route strings alone are never execution evidence. */
+const graphHandler = async (input: AuditSkillInput, tools: SkillTools) => { await tools.portfolio(); await tools.graph(); await tools.evidence(); };
+const policyHandler = async (input: AuditSkillInput, tools: SkillTools) => { await graphHandler(input, tools); await tools.policy(); };
+const routeHandlers: Readonly<Record<string, typeof graphHandler>> = Object.freeze({
+  "agentkit.audit.scope_framing": graphHandler,
+  "agentkit.audit.evidence_intake": graphHandler,
+  "agentkit.audit.trace_chain": graphHandler,
+  "agentkit.audit.finding_challenge": policyHandler,
+  "agentkit.audit.readiness_close": policyHandler,
+  "agentkit.nuclear.part21_applicability": policyHandler,
+  "agentkit.nuclear.part21_discovery_clock": policyHandler,
+  "agentkit.nuclear.deviation_screening": policyHandler,
+  "agentkit.nuclear.substantial_safety_hazard": policyHandler,
+  "agentkit.nuclear.notification_package": policyHandler,
+  "agentkit.nuclear.supplier_evaluation_transfer": policyHandler,
+  "agentkit.nuclear.commercial_grade_dedication": policyHandler,
+  "agentkit.nuclear.appendix_b_design_control": policyHandler,
+  "agentkit.nuclear.nonconformance_cap_bridge": policyHandler,
+  "agentkit.nuclear.records_and_audits": policyHandler,
+  "agentkit.nuclear.postings_and_communications": policyHandler,
+});
+export function getExecutableSkillRoutes(): readonly string[] { return Object.keys(routeHandlers); }
+interface SkillTools { portfolio(): Promise<void>; graph(): Promise<void>; evidence(): Promise<void>; policy(): Promise<void> }
+
+async function executeSkill(input: AuditSkillInput, services: AgentServices, persist: boolean) {
+  requireAgentScope(input, persist ? "agent:write" : "agent:read");
+  const row = selectGovernedSkill(await services.skills(input.mode === "preview"), input);
+  const skill = row.payload;
+  const checked = validateSkillAnswers(skill, input.answers);
+  const traceId = services.id();
+  const toolCalls: AgentToolCall[] = [];
+  const unknowns: string[] = [];
+  let graph: AgentGraph | null = null;
+  let policy: Record<string, any> | null = null;
+  let evidence: Record<string, any>[] = [];
+  let portfolio: Awaited<ReturnType<AgentServices["portfolio"]>> | null = null;
+  let sourceIds: string[] = [];
+  const run: AgentRunRecord = { traceId, auditId: input.auditId, findingId: input.findingId, actor: input.actor, skillId: skill.id, status: "running", startedAt: services.now(), toolCalls, skillRevision: row.version, skillHash: row.sourceSha256, configurationStatus: row.status, answers: input.answers, approvalDecisionId: row.approvalDecisionId ?? null, humanGate: { status: "pending", gate: skill.humanGate, approvalDecisionId: null }, durable: persist };
+  if (persist) await services.beginRun(run);
+  async function call(tool: string, args: Record<string, any>, operation: () => Promise<unknown>) {
+    const item: AgentToolCall = { id: services.id(), sequence: toolCalls.length + 1, tool, arguments: args, status: "completed", result: null, sourceIds: [], startedAt: services.now(), completedAt: "" };
+    try { item.result = await operation(); item.sourceIds = sourceIds.slice(); }
+    catch (error) { item.status = "unknown"; const reason = error instanceof Error ? error.message : String(error); item.result = { unknown: reason }; unknowns.push(`${tool}: ${reason}`); }
+    item.completedAt = services.now(); toolCalls.push(item);
+    if (persist) await services.recordTool(traceId, item);
   }
-  const finding = selectedFinding;
-  if (!finding) throw new Error("No database finding is available for AgentKit execution.");
-  const graph = await getGroundedGraphContext(finding.id);
-  const audit = portfolio.audit as any;
-  const evidenceIds = (portfolio.evidence as any[]).map((item) => item.id);
-  const steps: SimulationStep[] = [
-    { phase: 1, phaseId: "scope", phaseLabel: "Frame the audit", agent: "scope-facilitator", route: "agentkit.audit.scope_framing", status: "Completed", toolCalls: [{ sequence: 1, tool: "search_entities", connector: "core-graph", arguments: { query: finding.id, types: ["finding", "product", "audit"] }, result: `Resolved ${finding.id} within ${audit?.id ?? "database audit"}`, provenance: graph.source }], humanGate: { gate: "Scope confirmation", approver: String(finding.owner ?? "Assigned audit lead"), decision: "Pending qualified approval", rationale: `Scope is derived from database finding ${finding.id} and audit ${audit?.id ?? "not linked"}.`, timestamp: new Date().toISOString() } },
-    { phase: 2, phaseId: "evidence", phaseLabel: "Pull evidence", agent: "evidence-curator", route: "agentkit.audit.evidence_intake", status: "Completed", toolCalls: [{ sequence: 2, tool: "get_evidence", connector: "mysql-domain-store", arguments: { auditId: audit?.id }, result: `${evidenceIds.length} database evidence records available`, provenance: "MySQL domain records" }], humanGate: { gate: "Evidence sufficiency", approver: "Assigned evidence owner", decision: "Pending qualified approval", rationale: "Evidence scope is calculated from database records linked to the active audit.", timestamp: new Date().toISOString() } },
-    { phase: 3, phaseId: "traceability", phaseLabel: "Trace the chain", agent: "genealogy-navigator", route: "agentkit.audit.trace_chain", status: "Completed", toolCalls: [{ sequence: 3, tool: "trace_product_genealogy", connector: "mysql-graph-store", arguments: { findingId: finding.id }, result: `${graph.nodes.length} graph entities, ${graph.edges.length} graph relationships, ${graph.temporalEvents.length} temporal events`, provenance: graph.source }], humanGate: { gate: "Trace acceptance", approver: "Assigned configuration owner", decision: "Pending qualified approval", rationale: "Genealogy is read from the persistent graph projection.", timestamp: new Date().toISOString() } },
-    { phase: 4, phaseId: "findings", phaseLabel: "Evaluate findings", agent: "finding-challenger", route: "agentkit.audit.finding_challenge", status: "Completed", toolCalls: [{ sequence: 4, tool: "detect_control_gaps", connector: "mysql-domain-store", arguments: { auditId: audit?.id }, result: `${(portfolio.controls as any[]).filter((item) => item.status === "Gap").length} database control gaps detected`, provenance: "MySQL control records" }], humanGate: { gate: "Finding approval", approver: String(finding.owner ?? "Assigned audit lead"), decision: "Pending qualified approval", rationale: "Severity and disposition must be approved against database evidence.", timestamp: new Date().toISOString() } },
-    { phase: 5, phaseId: "closure", phaseLabel: "Review & close", agent: "readiness-facilitator", route: "agentkit.audit.readiness_close", status: "Completed", toolCalls: [{ sequence: 5, tool: "check_audit_readiness", connector: "mysql-domain-store", arguments: { auditId: audit?.id }, result: `${(portfolio.metrics as any)?.readiness ?? "Unknown"}% readiness from database metrics`, provenance: "MySQL domain portfolio" }], humanGate: { gate: "Report disposition", approver: "Qualified quality approver", decision: "Pending qualified approval", rationale: "Closure is derived from database readiness, findings, controls, and evidence.", timestamp: new Date().toISOString() } },
-  ];
-  // Execution steps above are the sole database-derived path.
-  return { finding, status: "completed", steps };
-}
-
-export async function runAuditSkill(skillId: string, answers: Record<string, unknown> = {}) {
-  const skills = (await listControlledConfigurationPayloads<AuditSkill>("skill")).map((item) => item.payload).filter((item) => item.id !== "audit-phases");
-  const skill = skills.find((item) => item.id === skillId) ?? skills[0];
-  if (!skill) throw new Error("No active audit skill exists in the controlled configuration repository.");
-  const answered = skill.questions.filter((question) => answers[question.id] !== undefined && String(answers[question.id]).trim().length > 0).length;
-  const required = skill.questions.filter((question) => question.required).length;
-  return {
-    skillId: skill.id,
-    route: skill.route,
-    agent: skill.agent,
-    status: answered >= required ? "ready_for_human_gate" : "needs_more_context",
-    completion: Math.round((answered / skill.questions.length) * 100),
-    skillContract: { id: (skill as any).skillContract, evidence: "linked database records", context: skill.purpose, humanGate: skill.humanGate },
-    nextQuestions: skill.questions.filter((question) => question.required && !answers[question.id]).map((question) => question.id),
-    recommendation: answered >= required ? skill.completionSignal : `Answer the remaining ${Math.max(required - answered, 0)} required question(s) before routing to the human gate.`,
+  const tools: SkillTools = {
+    async portfolio() {
+      await call("database.audit_portfolio", { auditId: input.auditId, findingId: input.findingId }, async () => {
+        portfolio = await services.portfolio(input.auditId);
+        if (portfolio.audit?.id !== input.auditId) throw new Error("Portfolio audit mismatch.");
+        if (input.findingId && !portfolio.findings.some(finding => finding.id === input.findingId)) throw new Error("Finding is not linked to the selected audit.");
+        sourceIds = [input.auditId, ...(input.findingId ? [input.findingId] : []), ...portfolio.sources.map(row => String(row.id))];
+        return portfolio;
+      });
+      // Ownership errors are terminal, not a graph degradation state.
+      if (!portfolio || portfolio.audit?.id !== input.auditId || input.findingId && !portfolio.findings.some(row => row.id === input.findingId)) throw new Error("No authorized audit/finding portfolio is available.");
+    },
+    async graph() {
+      if (!input.findingId) { unknowns.push("Graph traversal not performed: no existing findingId was selected."); return; }
+      await call("graph.audit_finding_traversal", { auditId: input.auditId, findingId: input.findingId }, async () => {
+        graph = validateAgentGraph(await services.graph(input.auditId, input.findingId!), input.auditId, input.findingId!);
+        sourceIds = [...new Set([...sourceIds, ...graph.sourceIds])];
+        return graph;
+      });
+    },
+    async evidence() {
+      const ids = [...new Set(Object.values(input.evidenceBindings ?? {}).flat())];
+      await call("evidence.resolve_existing_ids", { auditId: input.auditId, findingId: input.findingId, evidenceIds: ids }, async () => {
+        const resolved = await services.evidence(input, ids);
+        if (resolved.some(row => row.auditId !== input.auditId || !ids.includes(row.id))) throw new Error("Evidence audit/ID mismatch.");
+        evidence = resolved;
+        sourceIds = [...new Set([...sourceIds, ...evidence.map(row => String(row.id))])];
+        return evidence;
+      });
+    },
+    async policy() {
+      if (!graph) { unknowns.push("Policy evaluation not performed without audit-scoped graph evidence."); return; }
+      await call("policy.audit_finding_evaluate", { auditId: input.auditId, findingId: input.findingId, sourceIds }, async () => {
+        const evaluated = await services.policy(input, sourceIds);
+        if (evaluated.auditId !== input.auditId || evaluated.findingId !== input.findingId) throw new Error("Policy audit/finding mismatch.");
+        policy = evaluated;
+        return policy;
+      });
+    },
   };
-}
-
-export async function buildAuditReadinessReport(auditId?: string) {
-  if (!auditId) throw new Error("auditId is required.");
-  const portfolio = await getDomainPortfolio(auditId);
-  if (!portfolio.audit) throw new Error(`Audit ${auditId} was not found in the database.`);
-  const audit = portfolio.audit as any;
-  const domainMetrics = portfolio.metrics as any;
-  const firstFinding = (portfolio.findings as any[])[0];
-  const firstChange = (portfolio.changes as any[])[0];
-  return {
-    reportType: "audit-readiness",
-    reportVersion: "0.1-demo",
-    generatedAt: new Date().toISOString(),
-    dataMode: "database-resident synthetic dataset",
-    audit,
-    executivePosition: "Ready with actions",
-    metrics: domainMetrics,
-    controls: portfolio.controls,
-    findings: portfolio.findings,
-    evidence: portfolio.evidence,
-    sources: portfolio.sources,
-    agentRecommendation: firstFinding ? `Resolve ${firstFinding.id} evidence chain before accepting ${firstChange?.id ?? "the next database change"} into the configuration baseline.` : "Resolve the highest-priority database finding before accepting the next configuration change.",
-    humanDecisionsRequired: ["Confirm scope", "Accept evidence sufficiency", "Approve finding severity", "Approve report disposition"],
-    traceabilityNote: "This report preserves links to synthetic source records and is not a regulatory determination.",
-  };
-}
-
-export function reportToCsv(report: Awaited<ReturnType<typeof buildAuditReadinessReport>>) {
-  const rows = [
-    ["Report type", report.reportType], ["Report version", report.reportVersion], ["Generated at", report.generatedAt], ["Data mode", report.dataMode], ["Audit", report.audit.id], ["Audit title", report.audit.title], ["Executive position", report.executivePosition], ["Readiness", `${report.metrics.readiness}%`], ["Open findings", String(report.metrics.openFindings)], ["Supplier exposure", String(report.metrics.supplierExposure)], ["Agent recommendation", report.agentRecommendation], ["Traceability note", report.traceabilityNote],
-    [], ["Finding ID", "Title", "Severity", "Status", "Owner", "Age"], ...report.findings.map((finding) => [finding.id, finding.title, finding.severity, finding.status, finding.owner, finding.age]),
-    [], ["Control ID", "Control", "Coverage", "Status", "Signal"], ...report.controls.map((control) => [control.id, control.title, `${control.coverage}%`, control.status, control.signal]),
-  ];
-  return rows.map((row) => row.map((cell) => `"${String(cell ?? "").replaceAll('"', '""')}"`).join(",")).join("\n");
-}
-
-export async function getSkillPhaseFromId(skillId: string): Promise<AuditSkillPhase | undefined> {
-  const skills = (await listControlledConfigurationPayloads<AuditSkill>("skill")).map((item) => item.payload);
-  return skills.find((item) => item.id === skillId)?.phase;
-}
-
-export interface CustomFindingInput {
-  findingId: string;
-  title: string;
-  productId: string;
-  supplierId: string;
-  controlFamily: string;
-  alternateConnector: "vendor-erp-asterion" | "document-repository-live";
-}
-
-export async function simulateCustomAuditExecution(input: CustomFindingInput) {
-  const baseline = await simulateFullAuditExecution(input.findingId);
-  return { ...baseline, finding: { ...baseline.finding, title: input.title, productId: input.productId, supplierId: input.supplierId }, customContext: input };
-}
-
-export async function exportBitemporalGraph(findingId?: string) {
-  const context = await getGroundedGraphContext(findingId);
-  return { exportType: "bitemporal-event-sourced-property-graph", exportVersion: "0.2-database", generatedAt: new Date().toISOString(), findingId: context.findingId, schema: context.schema, nodes: context.nodes, relationships: context.edges, temporalEvents: context.temporalEvents, provenance: { sourceMode: "mysql-database", sourceSystems: ["database graph projection"], humanReviewRequired: true } };
-}
-
-export async function getAgentActivity(agentId?: string) {
-  const [simulation, configuredSkills] = await Promise.all([
-    simulateFullAuditExecution(),
-    listControlledConfigurationPayloads<AuditSkill>("skill"),
-  ]);
-  const skills = configuredSkills.map((item) => item.payload);
-  return simulation.steps
-    .filter((step) => !agentId || step.agent === agentId)
-    .map((step) => {
-      const skill = skills.find((candidate) => candidate.phase === step.phaseId);
-      return {
-        phase: step.phase,
-        phaseLabel: step.phaseLabel,
-        agent: step.agent,
-        route: step.route,
-        humanGate: step.humanGate,
-        toolCalls: step.toolCalls,
-        skill: skill ? {
-          id: skill.id,
-          name: skill.name,
-          purpose: skill.purpose,
-          phase: skill.phase,
-          route: skill.route,
-          contract: (skill as any).skillContract,
-          humanGate: skill.humanGate,
-          questionCount: skill.questions.length,
-          source: "mysql-controlled-configuration",
-        } : null,
-      };
+  const handler = routeHandlers[skill.route];
+  let dispatched = false;
+  try {
+    if (!handler) { unknowns.push(`No executable handler exists for route ${skill.route}; agent not dispatched.`); }
+    else { dispatched = true; await handler(input, tools); }
+    const requiredEvidence = (skill.requiredEvidence ?? []).map(requirement => {
+      const ids = input.evidenceBindings?.[requirement] ?? [];
+      const linked = evidence.filter(row => ids.includes(row.id) && (!input.findingId || row.findingId === input.findingId || Array.isArray(row.findingIds) && row.findingIds.includes(input.findingId) || Array.isArray(row.linkedTo) && row.linkedTo.includes(input.findingId)));
+      return { requirement, evidenceIds: linked.map(row => row.id), status: linked.length === ids.length && linked.length > 0 ? "present" : "unknown" };
     });
+    for (const missing of requiredEvidence.filter(row => row.status === "unknown")) unknowns.push(`Missing verified evidence: ${missing.requirement}`);
+    for (const missing of checked.missing) unknowns.push(`Required answer missing/invalid: ${missing.id}`);
+    const preview = input.mode === "preview";
+    const status = preview ? "draft_preview" : unknowns.length ? "needs_more_context" : "ready_for_human_gate";
+    const followUpQuestions = [...checked.missing.map(row => row.prompt), ...requiredEvidence.filter(row => row.status === "unknown").map(row => `Which existing evidence record supports ${row.requirement}?`)];
+    const result = {
+      ...run, status, completedAt: services.now(), appliedSkill: { id: skill.id, name: skill.name, version: row.version, sourceSha256: row.sourceSha256, configurationStatus: row.status, kind: row.kind, contract: skill, regulatoryApproval: preview ? "not_approved_for_runtime" : "governed_configuration_only_not_a_verdict" },
+      route: skill.route, agent: skill.agent, agentDispatched: dispatched, routeExecuted: dispatched && toolCalls.some(row => row.status === "completed"), skillContract: skill, completion: checked.completion, requirements: checked.requirements, requiredEvidence, unknowns, nextQuestions: checked.missing.map(row => row.id), followUpQuestions,
+      recommendation: unknowns.length ? "Evidence is incomplete. Use the source-linked questions; no regulatory conclusion is available." : "Tool results are available for qualified human review; no regulatory conclusion has been approved.",
+      verdict: "unknown" as const, sources: sourceIds, sourceIds, graph: graph as AgentGraph | null, policy: policy as Record<string, any> | null, grounding: { source: "mysql-database", auditId: input.auditId, findingId: input.findingId ?? null, graphTraversed: graph !== null, ontologyVersion: (graph as AgentGraph | null)?.ontologyVersion ?? null, nodeCount: (graph as AgentGraph | null)?.nodes.length ?? 0, edgeCount: (graph as AgentGraph | null)?.edges.length ?? 0, temporalEventCount: (graph as AgentGraph | null)?.temporalEvents.length ?? 0, sourceIds }, traversalProof: (graph as AgentGraph | null)?.traversalProof ?? null,
+      humanReviewRequired: true, humanGate: { gate: skill.humanGate, status: "pending", approvalDecisionId: null, finalVerdict: "not_issued" },
+    };
+    if (persist) await services.finishRun(result);
+    return result;
+  } catch (error) {
+    if (persist) await services.finishRun({ ...run, status: "failed", completedAt: services.now(), error: error instanceof Error ? error.message : String(error), unknowns });
+    throw error;
+  }
 }
-
-
-export async function finalizeAuditReport(auditId: string, actor: string, auditorNarrative = "", approved = false) {
-  if (!approved) throw new Error("Qualified approval is required before promoting the report into the authoritative graph.");
-  const report = await buildAuditReadinessReport(auditId);
-  const graphPromotion = await promoteApprovedAuditToGraph(auditId, actor);
-  const snapshot = { ...report, auditorNarrative, finalizedAt: new Date().toISOString(), finalizedBy: actor, status: "finalized" as const, graphPromotion };
-  const snapshotHash = crypto.createHash("sha256").update(JSON.stringify(snapshot)).digest("hex");
-  const reportId = `report-${auditId.toLowerCase()}-${Date.now()}`;
-  await upsertDomainRecord({ recordType: "report", recordId: reportId, auditId, payload: { ...snapshot, reportId, snapshotHash, storage: "mysql-domain-record" } });
-  const graphSnapshot = await recordFinalizedGraphSnapshot({ auditId, reportId, snapshotHash, actor });
-  const event = await appendAssuranceEvent({ type: "audit_report_finalized", actor, auditId, entityId: reportId, payload: { reportId, auditId, snapshotHash, graphSnapshot, humanGate: "Qualified report approver", immutableSnapshot: true } });
-  return { ok: true, reportId, auditId, snapshotHash, graphSnapshot, event, report: snapshot };
+export async function runAuditSkill(input: AuditSkillInput | string, answers: Record<string, unknown> = {}, context?: Omit<AuditSkillInput, "skillId" | "answers">, services = createAgentServices()) {
+  const request = typeof input === "string" ? context ? { ...context, skillId: input, answers } : null : input;
+  if (!request) throw new Error("auditId, findingId context and trusted principal are required; legacy context-free execution is disabled.");
+  return executeSkill({ ...request, mode: request.mode ?? "runtime" }, services, true);
+}
+export function previewAuditSkill(input: AuditSkillInput, services = createAgentServices()) { return executeSkill({ ...input, mode: "preview" }, services, false); }
+export async function getAgentKitManifest(services = createAgentServices()) {
+  const skills = await services.skills(true);
+  return { protocol: "agentkit-audit-scoped", version: "1.0", source: "mysql-controlled-configuration", skills: skills.map(row => ({ ...row.payload, configurationVersion: row.version, sourceSha256: row.sourceSha256, configurationStatus: row.status, governanceVerified: row.governanceVerified === true, approvalDecisionId: row.approvalDecisionId ?? null, runtimeApproved: row.kind === "skill" && row.status === "active" && !!row.approvedBy && !!row.approvedAt && row.governanceVerified === true, executableHandler: !!routeHandlers[row.payload.route] })), executionContract: { durableRuns: "part21_agent_runs", toolCalls: "part21_agent_tool_calls", simulation: "disabled", qualifiedHumanReviewRequired: true } };
+}
+export async function simulateFullAuditExecution(_findingId?: string): Promise<any> { throw new Error("Static/simulated audit execution is disabled; invoke an explicit audit-scoped governed skill instead. No records created."); }
+export interface CustomFindingInput { findingId: string; title: string; productId: string; supplierId: string; controlFamily: string; alternateConnector: "vendor-erp-asterion" | "document-repository-live" }
+export async function simulateCustomAuditExecution(_input: CustomFindingInput): Promise<any> { throw new Error("Synthetic custom execution is disabled; supplied titles cannot overwrite operational facts. No records created."); }
+export async function getSkillPhaseFromId(skillId: string, services = createAgentServices()): Promise<AuditSkillPhase | undefined> { const rows = (await services.skills(false)).filter(row => row.configId === skillId); if (rows.length > 1) throw new Error("Ambiguous skill revision."); return rows[0]?.payload.phase; }
+export async function buildAuditReadinessReport(auditId?: string, services = createAgentServices()) {
+  if (!auditId) throw new Error("auditId is required.");
+  const portfolio = await services.portfolio(auditId);
+  if (portfolio.audit?.id !== auditId) throw new Error("Audit scope mismatch.");
+  return { reportType: "audit-readiness", reportVersion: "1.0-draft", generatedAt: services.now(), dataMode: "mysql-database", audit: portfolio.audit, executivePosition: "Qualified review required", metrics: portfolio.metrics, controls: portfolio.controls, findings: portfolio.findings, evidence: portfolio.evidence, sources: portfolio.sources, agentRecommendation: "Review the persisted evidence, policy results, and unresolved questions; this draft has no approved readiness or regulatory disposition.", humanDecisionsRequired: ["Confirm scope", "Accept evidence sufficiency", "Approve finding severity", "Approve report disposition"], traceabilityNote: "Draft database projection; not a compliance certification or regulatory determination." };
+}
+export function reportToCsv(report: Awaited<ReturnType<typeof buildAuditReadinessReport>>) {
+  const rows: unknown[][] = [["Report type", report.reportType], ["Report version", report.reportVersion], ["Generated at", report.generatedAt], ["Audit", report.audit.id], ["Executive position", report.executivePosition], ["Readiness", report.metrics?.readiness ?? "Unknown"], ["Traceability note", report.traceabilityNote], [], ["Finding ID", "Title", "Severity", "Status", "Owner"], ...report.findings.map(row => [row.id, row.title, row.severity, row.status, row.owner])];
+  return rows.map(row => row.map(cell => `"${String(cell ?? "").replaceAll('"', '""')}"`).join(",")).join("\n");
+}
+export async function exportBitemporalGraph(findingId?: string, auditId?: string, services = createAgentServices()) {
+  if (!findingId || !auditId) throw new Error("auditId and findingId are required; no graph fallback is allowed.");
+  const graph = validateAgentGraph(await services.graph(auditId, findingId), auditId, findingId);
+  return { exportType: "bitemporal-event-sourced-property-graph", exportVersion: "1.0", generatedAt: services.now(), ...graph, relationships: graph.edges, provenance: { sourceMode: "mysql-database", humanReviewRequired: true } };
+}
+export async function getAgentActivity(agentId?: string, auditId?: string, services = createAgentServices()) { if (!auditId) throw new Error("auditId is required."); const runs = await services.records("agent_run", auditId); return runs.filter(run => !agentId || run.agent === agentId || run.agentId === agentId || run.skillId === agentId); }
+function canonicalArtifact(value: unknown): string {
+  if (value === null || typeof value !== "object") return JSON.stringify(value) ?? "null";
+  if (Array.isArray(value)) return `[${value.map(canonicalArtifact).join(",")}]`;
+  return `{${Object.keys(value).sort().map(key => `${JSON.stringify(key)}:${canonicalArtifact((value as Record<string, unknown>)[key])}`).join(",")}}`;
+}
+export async function prepareAuditReportSnapshot(auditId: string, services = createAgentServices()) {
+  const { generatedAt: _generatedAt, ...artifact } = await buildAuditReadinessReport(auditId, services);
+  const canonical = canonicalArtifact(artifact);
+  return { auditId, artifact: JSON.parse(canonical) as typeof artifact, artifactSha256: crypto.createHash("sha256").update(canonical).digest("hex") };
+}
+export function prepareFindingDraftSnapshot(draft: AgentRecord) {
+  const artifact = { title: draft.title, description: draft.description, severity: draft.severity ?? null, auditId: draft.auditId, findingId: draft.findingId ?? null, conversationId: draft.conversationId, kanbanItemId: draft.kanbanItemId, sourceTraceIds: draft.sourceTraceIds ?? [] };
+  // Trace IDs are execution evidence, not approval content; excluding them keeps the decision digest stable.
+  const canonical = canonicalArtifact({ title: artifact.title, description: artifact.description, severity: artifact.severity, auditId: artifact.auditId, findingId: artifact.findingId, conversationId: artifact.conversationId, kanbanItemId: artifact.kanbanItemId });
+  return { artifact, artifactSha256: crypto.createHash("sha256").update(canonical).digest("hex") };
+}
+/** Backwards signature retained, but a client approval boolean is never authority. Parent report gate owns finalization. */
+export async function finalizeAuditReport(auditId: string, actor: string, auditorNarrative = "", decision: string | boolean | { approvalDecisionId: string; principal: AgentScope["principal"] } = false, principal?: AgentScope["principal"], services = createAgentServices()): Promise<any> {
+  const approvalDecisionId = typeof decision === "object" ? decision.approvalDecisionId : decision;
+  const trustedPrincipal = typeof decision === "object" ? decision.principal : principal;
+  if (typeof approvalDecisionId !== "string" || !approvalDecisionId.trim()) throw new Error("A persisted authorized approvalDecisionId is required; boolean approvals are rejected.");
+  const scope = { auditId, actor, principal: trustedPrincipal! };
+  requireAgentScope(scope, "agent:write");
+  const prepared = await prepareAuditReportSnapshot(auditId, services);
+  const decisions = await services.records("report_approval_decision", auditId);
+  const approved = decisions.find(row => row.id === approvalDecisionId);
+  if (!approved || approved.auditId !== auditId || approved.status !== "approved" || approved.principalId !== trustedPrincipal!.id || approved.artifactSha256 !== prepared.artifactSha256) throw new Error("Persisted approval decision does not authorize this exact audit artifact/principal.");
+  if (!services.finalizeReport) throw new Error("Governed report-approval adapter is unavailable; no report or graph was finalized.");
+  return services.finalizeReport({ ...scope, approvalDecisionId, auditorNarrative, ...prepared });
 }

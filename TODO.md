@@ -72,3 +72,15 @@
 - [ ] **Implement a qualified records vault** — maintained Object Lock storage for original bytes and revisions, per-record retention triggers, legal holds, authenticated identity-bound approvals, least privilege, retrieval and restore evidence. MinIO/immudb do not certify Appendix B or prove truth merely by hashing.
 - [ ] **Evaluate optional Ollama inference** — deploy on adequate separate private compute only after host/model authorization, authenticate the API, preserve graph/skill/source grounding and traces, prohibit unapproved cloud fallback, and do not claim whole-system airgap while Muse remains external.
 - [ ] **Activate nuclear skills only through real human review** — eleven focused contracts currently exist as draft candidates; their route strings and clock metadata are not evidence of deployed agents or timers. Preserve prior configuration and audit records, keep authority/approval trace truthful, and expose exact skill revisions and evidence gaps.
+
+## Authorized implementation outcomes — 2026-11-18 12:01 UTC
+
+- [ ] Execute real Temporal workflows for event-triggered 60-day evaluation/interim and 2-day NRC clocks, preserve triggering dates through corrections/restarts, support independent five-working-day and 30-day obligations, and show workflow/outbox/worker health truthfully.
+- [ ] Preserve and download original Kanban/document/evidence bytes with verified digests, source identity, exact revisions, conversation/skill linkage, custody and retention basis; flag missing legacy originals rather than fabricate them.
+- [ ] Provide a verified maintained Object Lock vault adapter and immudb verification integration with independent proof/checkpoint records; do not claim live protected storage until actual provider behavior is confirmed.
+- [ ] Enforce common authenticated roles, audit scope and conversation/card ownership across REST/MCP/connector paths; derive actor from identity; persist qualified approvals instead of trusting request booleans.
+- [ ] Remove invented narrative hints, first-audit fallbacks and cross-audit graph traversal; return actual ontology version, node/edge/event IDs, effective-time filtering and run provenance.
+- [ ] Ingest versioned eCFR provisions and separately controlled guidance, preserve raw source bytes/dates/digests, correct nuclear citations, and replace keyword policy coverage with deterministic pass/fail/unknown/not-applicable evidence tests.
+- [ ] Execute selected skill ID/version and tool route with per-required-answer/evidence validation, persisted run/tool traces, visible follow-ups and human gates; keep all Muse messages/attachments on the correct Kanban dossier.
+- [ ] Expose reviewed immutable configuration revisions, diffs, activation/retirement, nuclear audit profiles and provision-level Part21/Appendix B coverage; retain original versions and unresolved interpretations.
+- [ ] Retain the existing live model provider and remove Ollama from this implementation scope. Keep Socra unchanged and preserve the current connector paths.

@@ -1,0 +1,6 @@
+{
+  "extends": "../../tsconfig.json",
+  "include": ["./**/*.ts", "../deadline-store.ts"],
+  "exclude": ["./artifacts"],
+  "compilerOptions": { "incremental": false, "types": ["node"] }
+}
