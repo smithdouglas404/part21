@@ -2,6 +2,7 @@ import { appendAssuranceEvent } from "./event-store";
 import { getControlledConfiguration, listControlledConfigurationPayloads } from "./config-store";
 import { getDomainRecord, listDomainRecords, upsertDomainRecord } from "./domain-store";
 import { finalizeAuditReport } from "./agentkit";
+import { requireApprovalRule } from "./approval-rules";
 
 type ApprovalTask = {
   approvalId: string;
@@ -25,6 +26,8 @@ async function resolvePersona(personaId: string) {
 export async function routeFinalReportApproval(auditId: string, personaId: string, routedBy: string, note = "Final report requires qualified human disposition.", person?: { id: string; name: string; email: string }) {
   if (!auditId) throw new Error("auditId is required.");
   const persona = await resolvePersona(personaId);
+  const rule = await requireApprovalRule("audit_report_finalization");
+  if (!rule.allowedRoleIds.includes(personaId)) throw new Error(`${persona.title} is not authorized to approve a final Part 21 report. Authorized roles: ${rule.allowedRoleIds.join(", ")}.`);
   const approvalId = `approval-${auditId.toLowerCase()}-${personaId}`;
   const existing = await getDomainRecord<ApprovalTask>("report_approval_task", approvalId);
   if (existing?.status === "approved") return { ok: true, reused: true, task: existing };
@@ -48,8 +51,8 @@ export async function routeFinalReportApproval(auditId: string, personaId: strin
     },
     report: { reportType: "audit-readiness", requested: true },
   };
-  await upsertDomainRecord({ recordType: "report_approval_task", recordId: approvalId, auditId, payload: { ...task, note } });
-  const event = await appendAssuranceEvent({ type: "audit_report_routed_for_approval", actor: routedBy, auditId, entityId: approvalId, payload: { approvalId, personaId, role: persona.title, note, humanGate: persona.alertRule } });
+  await upsertDomainRecord({ recordType: "report_approval_task", recordId: approvalId, auditId, payload: { ...task, note, authorization: { ruleId: rule.id, allowedRoleIds: rule.allowedRoleIds, separationOfDutiesRequired: rule.separationOfDutiesRequired } } });
+  const event = await appendAssuranceEvent({ type: "audit_report_routed_for_approval", actor: routedBy, auditId, entityId: approvalId, payload: { approvalId, personaId, role: persona.title, personId: person.id, personName: person.name, note, humanGate: persona.alertRule, authorizationRuleId: rule.id } });
   return { ok: true, task, event };
 }
 
