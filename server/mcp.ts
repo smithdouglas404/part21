@@ -6,6 +6,7 @@ import { approveWorkbookImport, importLocalWorkbook, importWorkbookPayload, list
 import { runWeeklySourceSync } from "./weekly-sync";
 import { getGroundedGraphContext } from "./graph-store";
 import { getDomainPortfolio, upsertDomainRecord } from "./domain-store";
+import { attachKanbanAsset, createKanbanItem, listKanbanItems, moveKanbanItem } from "./kanban-store";
 
 export async function getMcpManifest() {
   const configuredConnectors = await listControlledConfigurationPayloads<any>("connector");
@@ -123,6 +124,14 @@ export async function callMcpTool(name: string, args: Record<string, unknown> = 
       return await approveWorkbookImport(String(args.workbookId ?? ""), String(args.actor ?? "MCP caller"), String(args.note ?? "Approved after human review"));
     case "run_weekly_source_sync":
       return runWeeklySourceSync(String(args.actor ?? "MCP scheduler"));
+    case "field_kanban_list":
+      return listKanbanItems(String(args.auditId ?? ""));
+    case "field_kanban_create":
+      return createKanbanItem({ auditId: String(args.auditId ?? ""), title: String(args.title ?? ""), description: String(args.description ?? ""), status: (args.status as any) ?? "backlog", priority: (args.priority as any) ?? "medium", attention: true, source: "field", ownerPersonId: args.ownerPersonId ? String(args.ownerPersonId) : undefined, createdBy: String(args.createdBy ?? "Muse field operator") });
+    case "field_kanban_move":
+      return moveKanbanItem(String(args.itemId ?? ""), String(args.status ?? "backlog") as any, String(args.actor ?? "Muse field operator"));
+    case "field_kanban_attach":
+      return attachKanbanAsset({ itemId: String(args.itemId ?? ""), auditId: String(args.auditId ?? ""), filename: String(args.filename ?? "field-attachment"), mediaType: String(args.mediaType ?? "application/octet-stream"), kind: (args.kind as any) ?? "document", base64: args.base64 ? String(args.base64) : undefined, transcript: args.transcript ? String(args.transcript) : undefined, createdBy: String(args.createdBy ?? "Muse field operator") });
     default:
       return { error: `Unknown tool: ${name}`, availableTools: mcpTools.map((tool) => tool.name) };
   }

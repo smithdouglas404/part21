@@ -202,6 +202,10 @@ export const mcpTools: McpToolDefinition[] = [
   { name: "excel_import_local_workbook", group: "Excel adapter", description: "Import a workbook by filename from the configured EXCEL_ROOT directory and return a hashed human-gated revision proposal.", example: "{ filename: 'supplier-notifications.xlsx', actor: 'Field auditor' }" },
   { name: "excel_approve_import", group: "Excel adapter", description: "Record human approval for the current workbook revision before any graph mutation adapter is allowed.", example: "{ workbookId: 'WB-20261118010000', actor: 'Quality approver' }" },
   { name: "run_weekly_source_sync", group: "Scheduled compliance", description: "Synchronize changed local supplier workbooks, evaluate audit readiness and policy coverage, and list enterprise connectors still awaiting configuration.", example: "{ actor: 'Weekly scheduler' }" },
+  { name: "field_kanban_list", group: "Field engagement", description: "List audit-scoped field backlog items, red attention flags, and attached evidence metadata.", example: "{ auditId: 'selected-audit' }" },
+  { name: "field_kanban_create", group: "Field engagement", description: "Create a database-backed field observation or action item from Muse speech, text, or an agent recommendation.", example: "{ auditId: 'selected-audit', title: '...', priority: 'high', createdBy: 'Field operator' }" },
+  { name: "field_kanban_move", group: "Field engagement", description: "Move a field item through backlog, in progress, blocked, review, or final with a durable event record.", example: "{ itemId: 'KB-...', status: 'review', actor: 'Supervisor' }" },
+  { name: "field_kanban_attach", group: "Field engagement", description: "Attach a photo, document, or voice transcript to a field item with SHA-256 provenance.", example: "{ itemId: 'KB-...', auditId: 'selected-audit', kind: 'photo', filename: 'site.jpg', base64: '…' }" },
 ];
 
 export const metrics = {
