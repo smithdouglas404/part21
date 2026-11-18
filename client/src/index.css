@@ -426,3 +426,10 @@ kbd { margin-left: auto; border: 1px solid #2d4358; padding: 2px 5px; border-rad
 .decision-next-step { display: flex; gap: 8px; align-items: flex-start; margin-top: 11px; color: #bbd4ed; font-size: 10px; line-height: 1.45; }
 .decision-warning { display: block; margin-top: 11px; color: #f0c879; line-height: 1.45; }
 @media (max-width: 600px) { .part21-decision-grid { grid-template-columns: 1fr; } }
+.pert-legend { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 12px; color: #7c96aa; font-family: "IBM Plex Mono", monospace; font-size: 8px; text-transform: uppercase; letter-spacing: .04em; }
+.pert-legend span { display: inline-flex; align-items: center; gap: 5px; }
+.legend-dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: #52748c; }
+.legend-dot.complete { background: #5fd49b; box-shadow: 0 0 7px #5fd49b66; }
+.legend-dot.active { background: #65dbe4; box-shadow: 0 0 7px #65dbe466; }
+.legend-dot.queued { background: #d1a85e; }
+.legend-dot.blocked { background: #ed777e; box-shadow: 0 0 7px #ed777e55; }
