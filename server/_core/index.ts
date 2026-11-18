@@ -10,6 +10,7 @@ import { buildAuditReadinessReport, exportBitemporalGraph, getAgentActivity, get
 import { ontologyStorageStatus, syncOntologySnapshot } from "../ontology-store";
 import { getReportDraft, registerEvidence } from "../evidence";
 import { assessRemediationImpact, part21RegulatoryPack, traverseRegulatoryTree } from "../../shared/regulatory";
+import { answerGroundedQuestion, configureAiProvider, getAiStatus } from "../ai";
 import { createContext } from "./context";
 import { serveStatic, setupVite } from "./vite";
 
@@ -53,6 +54,9 @@ async function startServer() {
   app.get("/api/regulatory/pack", (_req, res) => res.json(part21RegulatoryPack));
   app.get("/api/regulatory/trace", (req, res) => res.json(traverseRegulatoryTree(typeof req.query.findingId === "string" ? req.query.findingId : undefined)));
   app.get("/api/regulatory/impact", (req, res) => res.json(assessRemediationImpact(typeof req.query.findingId === "string" ? req.query.findingId : undefined)));
+  app.get("/api/ai/status", (_req, res) => res.json(getAiStatus()));
+  app.post("/api/ai/ask", (req, res) => res.json(answerGroundedQuestion(String(req.body?.question ?? ""))));
+  app.post("/api/ai/config", (req, res) => res.json(configureAiProvider(req.body?.provider === "anthropic" ? "anthropic" : "openai", String(req.body?.key ?? ""))));
   app.get("/api/ontology/storage", async (_req, res) => {
     res.json(await ontologyStorageStatus());
   });

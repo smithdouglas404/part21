@@ -1,0 +1,31 @@
+import { regulatoryTraceForFinding } from "../shared/regulatory";
+import { getFindingOntologyContext, getTemporalHistory } from "../shared/ontology";
+import { graphNodes } from "../shared/demo";
+
+const sandboxEnvironmentProvider: "openai" | "anthropic" | null = process.env.OPENAI_API_KEY ? "openai" : process.env.ANTHROPIC_API_KEY ? "anthropic" : null;
+let configuredProvider: "openai" | "anthropic" | null = null;
+let configuredAt: string | null = null;
+
+export function getAiStatus() {
+  return { mode: configuredProvider ? "provider-configured" : "demo-grounded", provider: configuredProvider, keyStored: Boolean(configuredProvider), sandboxEnvironmentProvider, keyStorage: "runtime environment / secret manager contract", usedFor: ["graph questions", "finding insights", "remediation recommendations", "report drafting"], note: configuredProvider ? "Provider status was explicitly configured in the admin panel. This demo still uses deterministic grounded answers until an LLM execution adapter is enabled." : sandboxEnvironmentProvider ? "A sandbox runtime key is present but is not used by this demo. No client LLM key is configured. Current advice is deterministic and grounded in the synthetic graph, ontology, temporal events, and Part 21 source pack." : "No client LLM key is configured. Current advice is deterministic and grounded in the synthetic graph, ontology, temporal events, and Part 21 source pack.", configuredAt };
+}
+
+export function configureAiProvider(provider: "openai" | "anthropic", key: string) {
+  if (!key || key.length < 8) return { ok: false, error: "Provide a provider key or secret reference with at least 8 characters." };
+  configuredProvider = provider;
+  configuredAt = new Date().toISOString();
+  return { ok: true, status: getAiStatus(), message: "Provider status updated in the demo runtime. Production deployment should use a secret manager, not browser storage." };
+}
+
+export function answerGroundedQuestion(question: string) {
+  const normalized = question.toLowerCase();
+  const context = getFindingOntologyContext("FIND-2026-04");
+  const history = getTemporalHistory("finding-2026-04");
+  let answer = "The grounded assurance agent found no direct match in the synthetic graph. Try asking about a finding, Part 21 provision, supplier, change, evidence chain, risk, or remediation.";
+  if (normalized.includes("disprove") || normalized.includes("weakest")) answer = "The weakest evidence is EV-803: receiving inspection to heat-lot reconciliation is unresolved at 71% confidence. Counterevidence that would disprove the current finding would be a verified heat-lot certificate joined to the receiving record, plus an approved baseline impact review.";
+  else if (normalized.includes("changed") || normalized.includes("baseline")) answer = `The temporal chain shows ${history.length} recorded events. The highest-impact transition is CHG-014, a supplier material substitution that preceded the F-042 finding and left two evidence records requiring revalidation.`;
+  else if (normalized.includes("requirement") || normalized.includes("part 21") || normalized.includes("regulation")) answer = `The current finding traverses ${regulatoryTraceForFinding.path.slice(2).join(" → ")}. The system treats §21.21 evaluation, §21.51 records, and §21.61 failure-to-notify as candidate regulatory bases; a client-approved interpretation and human reportability decision are still required.`;
+  else if (normalized.includes("risk") || normalized.includes("impact")) answer = `Current modeled risk is ${regulatoryTraceForFinding.risk}. If the evidence chain remains unresolved, the organization may be unable to demonstrate traceability and may miss a timely evaluation or notification decision.`;
+  else if (normalized.includes("who") || normalized.includes("involved")) answer = `The graph context includes ${graphNodes.filter((node) => node.type === "person").map((person) => person.label).join(", ")}. Each relationship is synthetic until confirmed against the people directory and audit decision ledger.`;
+  return { question, answer, grounding: { findingId: "FIND-2026-04", graphEntities: graphNodes.length, temporalEvents: history.length, regulatoryPath: regulatoryTraceForFinding.path, sourceIds: ["FIND-2026-04", "AUD-026", "EV-803", "CHG-014"] }, provider: configuredProvider ? `${configuredProvider} configured · deterministic fallback · LLM not invoked` : "demo-grounded · no LLM invoked", humanReviewRequired: true };
+}
