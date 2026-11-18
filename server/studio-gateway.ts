@@ -91,9 +91,10 @@ export function getStudioGatewayStatus(requestOrigin?: string) {
     upstreamOpenApiUrl: upstreamOpenApiUrl || null,
     publicGatewayUrl: configuredPublicUrl || null,
     sharedBearerTokenConfigured: Boolean(process.env.STUDIO_PART21_BEARER_TOKEN),
+    tokenValidation: configuredMode() === "merged" && upstreamBaseUrl ? "live_socra_my_access" : "local_part21_connector_token",
     deploymentActionRequired: configuredMode() === "merged" && (!upstreamBaseUrl || !upstreamOpenApiUrl),
     note: configuredMode() === "merged"
-      ? "Merged mode is enabled; the gateway must be deployed at the Studio origin or mounted behind its reverse proxy."
+      ? "Merged sidecar mode is enabled; point the existing Muse connector at the public gateway OpenAPI. Socra remains the upstream application."
       : "Part 21-only mode is active; no Studio routes are proxied and the local OpenAPI is served.",
   };
 }

@@ -25,6 +25,36 @@ function configuredStudioBridgeToken(): ConnectToken | undefined {
   };
 }
 
+async function authenticateAgainstStudio(raw: string): Promise<ConnectToken | undefined> {
+  if (process.env.STUDIO_GATEWAY_MODE !== "merged") return undefined;
+  const upstreamBaseUrl = String(process.env.STUDIO_UPSTREAM_BASE_URL ?? "").trim();
+  if (!upstreamBaseUrl) return undefined;
+  try {
+    const response = await fetch(new URL("/api/v1/my_access", upstreamBaseUrl), {
+      method: "POST",
+      headers: { accept: "application/json", "content-type": "application/json", authorization: `Bearer ${raw}` },
+      body: "{}",
+    });
+    if (!response.ok) return undefined;
+    const result = await response.json() as any;
+    const access = result?.access ?? result?.data?.access ?? result?.result?.access;
+    const actor = result?.actor ?? result?.data?.actor ?? result?.result?.actor;
+    const role = result?.role ?? result?.data?.role ?? result?.result?.role;
+    return {
+      id: "STUDIO-LIVE-INTROSPECTION",
+      tokenHash: hash(raw),
+      label: "Live Socra bearer token",
+      actor: String(actor ?? process.env.STUDIO_BRIDGE_ACTOR ?? "Socra connector actor"),
+      role: String(role ?? process.env.STUDIO_BRIDGE_ROLE ?? "Socra connector role"),
+      auditId: process.env.STUDIO_BRIDGE_AUDIT_ID ? String(process.env.STUDIO_BRIDGE_AUDIT_ID) : undefined,
+      access: access === "look_only" ? "look_only" : (process.env.STUDIO_BRIDGE_ACCESS === "look_only" ? "look_only" : "make_changes"),
+      createdAt: "live-socra-introspection",
+    };
+  } catch {
+    return undefined;
+  }
+}
+
 export async function createConnectToken(input: { label: string; actor: string; role: string; auditId?: string; access: "look_only" | "make_changes" }) {
   const raw = `p21_${crypto.randomBytes(24).toString("base64url")}`;
   const token: ConnectToken = { id: `CON-${Date.now()}`, tokenHash: hash(raw), label: input.label, actor: input.actor, role: input.role, auditId: input.auditId, access: input.access, createdAt: new Date().toISOString() };
@@ -39,7 +69,8 @@ export async function authenticateConnectRequest(req: Request) {
   const tokens = await listDomainRecords<ConnectToken>("connect_token");
   const configuredToken = configuredStudioBridgeToken();
   const token = tokens.find((candidate) => candidate.tokenHash === hash(raw) && !candidate.revokedAt)
-    ?? (configuredToken?.tokenHash === hash(raw) ? configuredToken : undefined);
+    ?? (configuredToken?.tokenHash === hash(raw) ? configuredToken : undefined)
+    ?? await authenticateAgainstStudio(raw);
   if (!token) return { ok: false as const, status: 401, error: "Invalid or revoked connector token." };
   return { ok: true as const, token };
 }

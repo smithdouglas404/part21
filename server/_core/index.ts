@@ -42,6 +42,18 @@ async function respondToConnectedTool(req: Request, res: Response, tool: string)
   return res.json(result);
 }
 
+function firstForwardedValue(value: string | string[] | undefined) {
+  const raw = Array.isArray(value) ? value[0] : value;
+  return String(raw ?? "").split(",")[0].trim();
+}
+
+function publicOrigin(req: Request) {
+  if (typeof process.env.STUDIO_PUBLIC_URL === "string" && process.env.STUDIO_PUBLIC_URL.trim()) return process.env.STUDIO_PUBLIC_URL.trim();
+  const forwardedHost = firstForwardedValue(req.headers["x-forwarded-host"]);
+  const forwardedProto = firstForwardedValue(req.headers["x-forwarded-proto"]) || req.protocol;
+  return `${forwardedProto}://${forwardedHost || req.get("host")}`;
+}
+
 async function startServer() {
   const app = express();
   const server = createServer(app);
@@ -75,7 +87,7 @@ async function startServer() {
   });
   app.get("/api/v1/studio/merge-status", (req, res) => res.json(getStudioGatewayStatus(`${req.protocol}://${req.get("host")}`)));
   app.get("/api/v1/openapi.json", async (req, res) => {
-    const publicUrl = typeof process.env.STUDIO_PUBLIC_URL === "string" ? process.env.STUDIO_PUBLIC_URL : `${req.protocol}://${req.get("host")}`;
+    const publicUrl = publicOrigin(req);
     try {
       res.json(await getMergedStudioOpenApi(publicUrl));
     } catch (error) {

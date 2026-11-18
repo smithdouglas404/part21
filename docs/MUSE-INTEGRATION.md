@@ -148,20 +148,16 @@ The gateway is intentionally fail-visible. It does not claim to be merged unless
 
 ### Server-side configuration
 
-Set these values in the deployment secret/configuration store; never put the bearer token in source control or chat:
+The published Part 21 service is configured as a sidecar gateway. These non-secret settings keep Socra as the upstream system and do not change its deployment or database:
 
 ```text
 STUDIO_GATEWAY_MODE=merged
-STUDIO_UPSTREAM_BASE_URL=https://<private-or-internal-existing-studio-origin>
-STUDIO_UPSTREAM_OPENAPI_URL=https://<private-or-internal-existing-studio-origin>/api/v1/openapi.json
-STUDIO_PUBLIC_URL=https://studio.innume.com
-STUDIO_PART21_BEARER_TOKEN=<the same Studio token, entered as a protected secret>
-STUDIO_BRIDGE_ACTOR=<named connector actor>
-STUDIO_BRIDGE_ROLE=<authorized connector role>
+STUDIO_UPSTREAM_BASE_URL=https://studio.innume.com
+STUDIO_UPSTREAM_OPENAPI_URL=https://studio.innume.com/api/v1/openapi.json
 STUDIO_BRIDGE_ACCESS=make_changes
 ```
 
-`STUDIO_PART21_BEARER_TOKEN` is compared by SHA-256 and is never returned by the application. The configured actor, role, audit scope, and access level are applied to Part 21 calls made with that shared token. If the Studio deployment cannot provide the same token to the Part 21 gateway, use a separate Part 21 token instead and keep the existing Studio connector unchanged.
+The gateway does not store the Socra bearer token. For a Part 21 request, it validates the incoming bearer token by calling Socra's read-only `my_access` operation, then applies the least privilege returned by Socra and forwards the same token for Socra operations. A newly created Socra token labeled `Part 21 Gateway` can therefore be used without changing the existing Admin token.
 
 The merge status is visible at:
 
@@ -169,7 +165,7 @@ The merge status is visible at:
 GET https://studio.innume.com/api/v1/studio/merge-status
 ```
 
-A successful merged deployment reports `mode: "merged"`, an upstream configuration, and `sharedBearerTokenConfigured: true`. The live OpenAPI document must contain paths such as:
+A successful merged deployment reports `mode: "merged"`, an upstream configuration, and `tokenValidation: "live_socra_my_access"`. The live OpenAPI document must contain paths such as:
 
 ```text
 /api/v1/part21/field/kanban/list
@@ -181,13 +177,13 @@ A successful merged deployment reports `mode: "merged"`, an upstream configurati
 
 ### Meta Muse after deployment
 
-Keep the existing Meta Muse custom connector pointed at:
+Keep one Meta Muse custom connector, but change its imported OpenAPI address from the direct Socra address to the sidecar gateway:
 
 ```text
-https://studio.innume.com/api/v1/openapi.json
+https://part21ops-l6crvfht.manus.space/api/v1/openapi.json
 ```
 
-Refresh the imported schema or recreate the connector after the merged deployment is live. Keep:
+This is not a second connector. It is the same connector pointed at the combined gateway. The gateway proxies the existing Socra operations to `studio.innume.com` and adds Part 21 operations. Configure the new Socra `Part 21 Gateway` token in that same connector. Keep:
 
 ```text
 Auth type: Bearer token
@@ -210,4 +206,4 @@ Muse should first receive a confirmation preview. The item must not be written u
 
 ### Current boundary
 
-The gateway implementation and OpenAPI merge tests are in this project. This sandbox does not possess the private upstream origin, the `studio.innume.com` deployment binding, or the existing bearer token, so the domain-level cutover cannot be executed from here. The merge becomes live only when this gateway is deployed at the Studio origin or its reverse proxy is configured to route `/api/v1/part21/*` and `/api/v1/openapi.json` through it.
+The gateway implementation is deployed as a sidecar at `https://part21ops-l6crvfht.manus.space`. Socra remains at `https://studio.innume.com`; no Socra deployment or database was changed. The only remaining Muse-side action is refreshing the existing connector's OpenAPI address to the sidecar URL and entering the newly created additive Socra token.

@@ -8,5 +8,11 @@ COPY . .
 RUN pnpm build
 ENV NODE_ENV=production
 ENV PORT=3000
+# Sidecar mode is additive: Socra remains the upstream system and Part 21 routes
+# are exposed by this service without changing Socra's deployment or database.
+ENV STUDIO_GATEWAY_MODE=merged
+ENV STUDIO_UPSTREAM_BASE_URL=https://studio.innume.com
+ENV STUDIO_UPSTREAM_OPENAPI_URL=https://studio.innume.com/api/v1/openapi.json
+ENV STUDIO_BRIDGE_ACCESS=make_changes
 EXPOSE 3000
 CMD ["node", "dist/index.js"]
