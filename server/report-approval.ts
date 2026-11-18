@@ -59,6 +59,7 @@ export async function approveRoutedFinalReport(approvalId: string, actor: string
   const task = await getDomainRecord<ApprovalTask>("report_approval_task", approvalId);
   if (!task) throw new Error(`Approval task ${approvalId} was not found in the database.`);
   if (task.status !== "pending") throw new Error(`Approval task ${approvalId} is already ${task.status}.`);
+  if (actor.trim().toLowerCase() === task.routedBy.trim().toLowerCase()) throw new Error("Separation-of-duties violation: the auditor who routed the report cannot approve their own work.");
   const qualified = await getControlledConfiguration<any>("persona", task.target.personaId);
   if (!qualified.payload) throw new Error("The routed persona is no longer available in controlled configuration.");
   const finalization = await finalizeAuditReport(task.auditId, actor, note, true);
@@ -66,5 +67,18 @@ export async function approveRoutedFinalReport(approvalId: string, actor: string
   const completed: ApprovalTask = { ...task, status: "approved", decision: { actor, note, decidedAt, reportId: finalization.reportId, snapshotHash: finalization.snapshotHash, graphSnapshot: finalization.graphSnapshot } };
   await upsertDomainRecord({ recordType: "report_approval_task", recordId: approvalId, auditId: task.auditId, payload: completed });
   const event = await appendAssuranceEvent({ type: "audit_report_approval_completed", actor, auditId: task.auditId, entityId: approvalId, payload: { approvalId, reportId: finalization.reportId, snapshotHash: finalization.snapshotHash, graphSnapshot: finalization.graphSnapshot, humanGate: task.target.role, note, databaseRecord: true } });
-  return { ok: true, approval: completed, finalization, event };
+  return {
+    ok: true,
+    approval: completed,
+    finalization,
+    event,
+    lifecycle: {
+      reportStatus: "approved",
+      hashStatus: "sha256_recorded",
+      repositoryStatus: "stored_in_mysql_domain_repository",
+      graphStatus: "approved_snapshot_promoted",
+      completionStatus: "completed",
+      separationOfDuties: { routedBy: task.routedBy, approvedBy: actor, enforced: true },
+    },
+  };
 }
