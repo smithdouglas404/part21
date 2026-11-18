@@ -14,6 +14,7 @@ import { answerGroundedQuestion, configureAiProvider, getAiStatus } from "../ai"
 import { getEccCatalog, getEmbeddedEccModule } from "../../shared/ecc";
 import { decideGovernanceItem, getGovernanceBoard, moveGovernanceItem } from "../../shared/governance";
 import { controlAgent, getAgentRegistry } from "../agent-runtime";
+import { getVendoredEccLibrary } from "../ecc-library";
 import { buildPolicyGraph, compileDocumentToPolicy, evaluatePart21Policy, getPolicyCoverage, part21PolicyPack } from "../../shared/policy";
 import { createContext } from "./context";
 import { serveStatic, setupVite } from "./vite";
@@ -63,6 +64,7 @@ async function startServer() {
   app.post("/api/ai/config", (req, res) => res.json(configureAiProvider(req.body?.provider === "anthropic" ? "anthropic" : "openai", String(req.body?.key ?? ""))));
   app.get("/api/ecc/catalog", (_req, res) => res.json(getEccCatalog()));
   app.get("/api/ecc/module", (_req, res) => res.json(getEmbeddedEccModule()));
+  app.get("/api/ecc/library", (_req, res) => res.json(getVendoredEccLibrary()));
   app.get("/api/governance/board", (_req, res) => res.json(getGovernanceBoard()));
   app.post("/api/governance/move", (req, res) => res.json(moveGovernanceItem(String(req.body?.id ?? ""), req.body?.target, String(req.body?.actor ?? "Assurance user"))));
   app.post("/api/governance/decide", (req, res) => res.json(decideGovernanceItem(String(req.body?.id ?? ""), req.body?.action, String(req.body?.note ?? ""), req.body?.deferUntil, String(req.body?.actor ?? "Assurance user"))));

@@ -141,6 +141,11 @@ export const audits: AuditRecord[] = [
   { id: "AUD-026", title: "Unit 2 traceability & configuration", standard: "Part 21 · 21.51 / 21.61", scope: "Safety injection valve family", owner: "M. Lee", due: "28 Apr 2026", progress: 68, evidence: "32 / 47 linked", status: "In progress", findings: 3 },
   { id: "AUD-021", title: "Supplier oversight — Asterion", standard: "Procurement / supplier controls", scope: "Pressure-boundary forgings", owner: "D. Novak", due: "02 May 2026", progress: 42, evidence: "18 / 31 linked", status: "In progress", findings: 1 },
   { id: "AUD-019", title: "Corrective action effectiveness", standard: "21.61 · CAPA", scope: "Open major findings", owner: "S. Rao", due: "12 May 2026", progress: 18, evidence: "6 / 24 linked", status: "Planned", findings: 0 },
+  { id: "AUD-017", title: "Part 21 process applicability review", standard: "10 CFR Part 21 · §21.1 / §21.2", scope: "Northstar Unit 2 QA program", owner: "J. Chen", due: "18 May 2026", progress: 91, evidence: "44 / 46 linked", status: "Ready for review", findings: 2 },
+  { id: "AUD-014", title: "Configuration baseline integrity", standard: "Part 21 · §21.31 / §21.41", scope: "Design-change packages", owner: "R. Gomez", due: "23 May 2026", progress: 55, evidence: "21 / 38 linked", status: "In progress", findings: 4 },
+  { id: "AUD-011", title: "Document control and records retention", standard: "Quality records / §21.8", scope: "Controlled procedures and notices", owner: "A. Patel", due: "04 Jun 2026", progress: 34, evidence: "12 / 35 linked", status: "In progress", findings: 1 },
+  { id: "AUD-008", title: "Field records and inspection evidence", standard: "Part 21 · §21.51", scope: "Maintenance and inspection records", owner: "T. Brooks", due: "15 Jun 2026", progress: 7, evidence: "2 / 29 linked", status: "Planned", findings: 0 },
+  { id: "AUD-005", title: "Prior-year supplier notification audit", standard: "Supplier notification controls", scope: "External provider changes", owner: "M. Lee", due: "Filed · 12 Dec 2025", progress: 100, evidence: "56 / 56 linked", status: "Ready for review", findings: 5 },
 ];
 
 export const findings: FindingRecord[] = [
