@@ -5,6 +5,11 @@ import { getTemporalHistory } from "../shared/ontology";
 
 let pool: Pool | null = null;
 let initialized = false;
+const graphSchema = [
+  { table: "part21_graph_nodes", purpose: "Ontology entities", fields: "id · node_type · label · status · payload · updated_at" },
+  { table: "part21_graph_edges", purpose: "Typed relationships", fields: "id · from_id · to_id · relation · label · payload · updated_at" },
+  { table: "part21_graph_events", purpose: "Bitemporal event history", fields: "id · entity_id · valid_from · valid_to · recorded_at · recorded_by · operation · payload" },
+];
 
 function getPool() {
   if (!pool && process.env.DATABASE_URL) pool = createPool({ uri: process.env.DATABASE_URL, connectionLimit: 5 });
@@ -45,13 +50,13 @@ export async function getGroundedGraphContext(findingId = "FIND-2026-04") {
   const status = await ensureGraphStore();
   const db = getPool();
   if (!db) {
-    return { ...status, findingId, nodes: graphNodes, edges: graphEdges, temporalEvents: getTemporalHistory("finding-2026-04"), sourceIds: graphNodes.map((node) => node.id) };
+    return { ...status, findingId, schema: graphSchema, nodes: graphNodes, edges: graphEdges, temporalEvents: getTemporalHistory("finding-2026-04"), sourceIds: graphNodes.map((node) => node.id) };
   }
   await syncGraphSeed();
   const [nodes] = await db.query<any[]>(`SELECT id, node_type AS type, label, subtitle, status, payload FROM part21_graph_nodes ORDER BY id`);
   const [edges] = await db.query<any[]>(`SELECT id, from_id AS \`from\`, to_id AS \`to\`, relation, label, payload FROM part21_graph_edges ORDER BY id`);
   const [events] = await db.query<any[]>(`SELECT entity_id AS entityId, valid_from AS validFrom, valid_to AS validTo, recorded_at AS recordedAt, recorded_by AS recordedBy, operation, payload FROM part21_graph_events ORDER BY valid_from, recorded_at`);
-  return { ...status, findingId, nodes: nodes.map((node) => ({ ...node, ...parseJson(node.payload) })), edges: edges.map((edge) => ({ ...edge, ...parseJson(edge.payload) })), temporalEvents: events.map((event) => ({ ...event, payload: parseJson(event.payload) })), sourceIds: nodes.map((node) => node.id) };
+  return { ...status, findingId, schema: graphSchema, nodes: nodes.map((node) => ({ ...node, ...parseJson(node.payload) })), edges: edges.map((edge) => ({ ...edge, ...parseJson(edge.payload) })), temporalEvents: events.map((event) => ({ ...event, payload: parseJson(event.payload) })), sourceIds: nodes.map((node) => node.id) };
 }
 
 function parseJson(value: unknown) {
