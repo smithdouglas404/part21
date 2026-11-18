@@ -10,7 +10,7 @@ type ApprovalTask = {
   status: "pending" | "approved" | "declined";
   routedAt: string;
   routedBy: string;
-  target: { personaId: string; role: string; title: string; humanGate: string; focus: string[] };
+  target: { personId: string; personName: string; personEmail: string; personaId: string; role: string; title: string; humanGate: string; focus: string[] };
   report: { reportType: "audit-readiness"; requested: boolean };
   decision?: { actor: string; note: string; decidedAt: string; reportId: string; snapshotHash: string; graphSnapshot: unknown };
 };
@@ -22,12 +22,13 @@ async function resolvePersona(personaId: string) {
   return match;
 }
 
-export async function routeFinalReportApproval(auditId: string, personaId: string, routedBy: string, note = "Final report requires qualified human disposition.") {
+export async function routeFinalReportApproval(auditId: string, personaId: string, routedBy: string, note = "Final report requires qualified human disposition.", person?: { id: string; name: string; email: string }) {
   if (!auditId) throw new Error("auditId is required.");
   const persona = await resolvePersona(personaId);
   const approvalId = `approval-${auditId.toLowerCase()}-${personaId}`;
   const existing = await getDomainRecord<ApprovalTask>("report_approval_task", approvalId);
   if (existing?.status === "approved") return { ok: true, reused: true, task: existing };
+  if (!person?.id || !person.name) throw new Error("A named approver from the database people directory is required.");
   const task: ApprovalTask = {
     approvalId,
     recordType: "report_approval_task",
@@ -36,6 +37,9 @@ export async function routeFinalReportApproval(auditId: string, personaId: strin
     routedAt: new Date().toISOString(),
     routedBy,
     target: {
+      personId: person.id,
+      personName: person.name,
+      personEmail: person.email,
       personaId: persona.id,
       role: persona.title,
       title: persona.label,
@@ -59,7 +63,7 @@ export async function approveRoutedFinalReport(approvalId: string, actor: string
   const task = await getDomainRecord<ApprovalTask>("report_approval_task", approvalId);
   if (!task) throw new Error(`Approval task ${approvalId} was not found in the database.`);
   if (task.status !== "pending") throw new Error(`Approval task ${approvalId} is already ${task.status}.`);
-  if (actor.trim().toLowerCase() === task.routedBy.trim().toLowerCase()) throw new Error("Separation-of-duties violation: the auditor who routed the report cannot approve their own work.");
+  if (actor.trim().toLowerCase() === task.routedBy.trim().toLowerCase() || actor.trim().toLowerCase() === task.target.personName.trim().toLowerCase()) throw new Error("Separation-of-duties violation: the auditor who routed the report cannot approve their own work.");
   const qualified = await getControlledConfiguration<any>("persona", task.target.personaId);
   if (!qualified.payload) throw new Error("The routed persona is no longer available in controlled configuration.");
   const finalization = await finalizeAuditReport(task.auditId, actor, note, true);
@@ -78,7 +82,7 @@ export async function approveRoutedFinalReport(approvalId: string, actor: string
       repositoryStatus: "stored_in_mysql_domain_repository",
       graphStatus: "approved_snapshot_promoted",
       completionStatus: "completed",
-      separationOfDuties: { routedBy: task.routedBy, approvedBy: actor, enforced: true },
+      separationOfDuties: { routedBy: task.routedBy, approvedBy: actor, assignedPerson: task.target.personName, enforced: true },
     },
   };
 }
