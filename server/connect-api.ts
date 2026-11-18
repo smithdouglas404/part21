@@ -49,3 +49,13 @@ export function connectOpenApi(publicUrl = "") {
 }
 
 export async function listConnectTokens() { const tokens = await listDomainRecords<ConnectToken>("connect_token"); return tokens.map(({ tokenHash: _hash, ...safe }) => safe); }
+
+export async function revokeConnectToken(tokenId: string, actor: string) {
+  const tokens = await listDomainRecords<ConnectToken>("connect_token");
+  const token = tokens.find((candidate) => candidate.id === tokenId);
+  if (!token) throw new Error("Connector token was not found.");
+  const revokedAt = new Date().toISOString();
+  await upsertDomainRecord({ recordType: "connect_token", recordId: token.id, payload: { ...token, revokedAt } });
+  await appendAssuranceEvent({ type: "connect_token_revoked", actor, auditId: token.auditId, entityId: token.id, payload: { label: token.label } });
+  return { ok: true, tokenId, revokedAt };
+}
