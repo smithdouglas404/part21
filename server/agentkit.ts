@@ -1,9 +1,12 @@
+import crypto from "node:crypto";
 import type { AuditSkill, AuditSkillPhase } from "../shared/skills";
 import type { SimulationStep } from "../shared/execution";
 import { getEccCatalog } from "../shared/ecc";
-import { getDomainPortfolio, listAudits } from "./domain-store";
+import { getDomainPortfolio, listAudits, upsertDomainRecord } from "./domain-store";
 import { getGroundedGraphContext } from "./graph-store";
 import { getControlledConfiguration, listControlledConfigurationPayloads } from "./config-store";
+import { promoteApprovedAuditToGraph, recordFinalizedGraphSnapshot } from "./graph-projection";
+import { appendAssuranceEvent } from "./event-store";
 
 export async function getAgentKitManifest() {
   const [agents, skills, phases, connectors, ontology, regulatory, policy] = await Promise.all([
@@ -138,4 +141,18 @@ export async function exportBitemporalGraph(findingId?: string) {
 export async function getAgentActivity(agentId?: string) {
   const simulation = await simulateFullAuditExecution();
   return simulation.steps.filter((step) => !agentId || step.agent === agentId).map((step) => ({ phase: step.phase, phaseLabel: step.phaseLabel, agent: step.agent, route: step.route, humanGate: step.humanGate, toolCalls: step.toolCalls }));
+}
+
+
+export async function finalizeAuditReport(auditId: string, actor: string, auditorNarrative = "", approved = false) {
+  if (!approved) throw new Error("Qualified approval is required before promoting the report into the authoritative graph.");
+  const report = await buildAuditReadinessReport(auditId);
+  const graphPromotion = await promoteApprovedAuditToGraph(auditId, actor);
+  const snapshot = { ...report, auditorNarrative, finalizedAt: new Date().toISOString(), finalizedBy: actor, status: "finalized" as const, graphPromotion };
+  const snapshotHash = crypto.createHash("sha256").update(JSON.stringify(snapshot)).digest("hex");
+  const reportId = `report-${auditId.toLowerCase()}-${Date.now()}`;
+  await upsertDomainRecord({ recordType: "report", recordId: reportId, auditId, payload: { ...snapshot, reportId, snapshotHash, storage: "mysql-domain-record" } });
+  const graphSnapshot = await recordFinalizedGraphSnapshot({ auditId, reportId, snapshotHash, actor });
+  const event = await appendAssuranceEvent({ type: "audit_report_finalized", actor, auditId, entityId: reportId, payload: { reportId, auditId, snapshotHash, graphSnapshot, humanGate: "Qualified report approver", immutableSnapshot: true } });
+  return { ok: true, reportId, auditId, snapshotHash, graphSnapshot, event, report: snapshot };
 }

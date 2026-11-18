@@ -22,7 +22,7 @@ export async function upsertDomainRecord(record: DomainRecord & { content?: Buff
   const db = getPool();
   const contentSha256 = record.content ? crypto.createHash("sha256").update(record.content).digest("hex") : null;
   await db.query(`INSERT INTO part21_domain_records (record_type, record_id, audit_id, payload, content_sha256) VALUES (?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE audit_id=VALUES(audit_id), payload=VALUES(payload), content_sha256=VALUES(content_sha256), updated_at=CURRENT_TIMESTAMP`, [record.recordType, record.recordId, record.auditId ?? null, JSON.stringify(record.payload), contentSha256]);
-  return { ...record, contentSha256 };
+  return { ...record, contentSha256, graphProjection: { projected: false, status: "pending_report_approval", reason: "Working database records do not mutate the authoritative graph until a qualified report is finalized." } };
 }
 
 export async function getDomainRecord<T extends Record<string, unknown>>(recordType: string, recordId: string): Promise<T | null> {

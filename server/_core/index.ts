@@ -6,7 +6,7 @@ import { registerOAuthRoutes } from "./oauth";
 import { publicPlatformScript } from "./publicConfig";
 import { appRouter } from "../routers";
 import { callMcpTool, getMcpManifest } from "../mcp";
-import { buildAuditReadinessReport, exportBitemporalGraph, getAgentActivity, getAgentKitManifest, reportToCsv, runAuditSkill, simulateCustomAuditExecution, simulateFullAuditExecution } from "../agentkit";
+import { buildAuditReadinessReport, exportBitemporalGraph, finalizeAuditReport, getAgentActivity, getAgentKitManifest, reportToCsv, runAuditSkill, simulateCustomAuditExecution, simulateFullAuditExecution } from "../agentkit";
 import { ontologyStorageStatus, syncOntologySnapshot } from "../ontology-store";
 import { getReportDraft, registerEvidence } from "../evidence";
 import { assessControlledRemediationImpact, getControlledRegulatoryPack, traverseControlledRegulatoryTree } from "../regulatory-runtime";
@@ -61,6 +61,7 @@ async function startServer() {
   });
   app.get("/api/events/status", async (_req, res) => res.json(await getEventStoreStatus()));
   app.get("/api/events", async (req, res) => res.json(await listAssuranceEvents({ type: typeof req.query.type === "string" ? req.query.type : undefined, entityId: typeof req.query.entityId === "string" ? req.query.entityId : undefined, auditId: typeof req.query.auditId === "string" ? req.query.auditId : undefined })));
+  app.get("/api/graph/projection-events", async (req, res) => res.json(await listAssuranceEvents({ type: "graph_projection_completed", auditId: typeof req.query.auditId === "string" ? req.query.auditId : undefined, entityId: typeof req.query.entityId === "string" ? req.query.entityId : undefined })));
   app.post("/api/sync/weekly", async (req, res) => res.json(await runWeeklySourceSync(String(req.body?.actor ?? "Application weekly scheduler"))));
   app.get("/api/approvals/pending", async (_req, res) => res.json({ approvalStatus: "pending_human_review", items: await listPendingWorkbookApprovals(), humanGate: "Qualified reviewer must inspect source provenance and revision diff before approval." }));
   app.post("/api/approvals/workbooks/:workbookId", async (req, res) => res.json(await approveWorkbookImport(req.params.workbookId, String(req.body?.actor ?? "Quality approver"), String(req.body?.note ?? "Approved after human review"))));
@@ -94,6 +95,7 @@ async function startServer() {
   app.get("/api/graph/export", async (req, res) => res.json(await exportBitemporalGraph(typeof req.query.findingId === "string" ? req.query.findingId : undefined)));
   app.post("/api/evidence/intake", async (req, res) => res.json(await registerEvidence(req.body ?? {})));
   app.get("/api/reports/draft", async (req, res) => res.json(await getReportDraft(typeof req.query.findingId === "string" ? req.query.findingId : undefined)));
+  app.post("/api/reports/finalize", async (req, res) => { try { res.json(await finalizeAuditReport(String(req.body?.auditId ?? ""), String(req.body?.actor ?? "Qualified report approver"), String(req.body?.auditorNarrative ?? ""), req.body?.approved === true)); } catch (error) { res.status(409).json({ ok: false, error: error instanceof Error ? error.message : "Report finalization blocked", authoritativeGraphWrite: false }); } });
   app.get("/api/regulatory/pack", async (_req, res) => res.json(await getControlledRegulatoryPack()));
   app.get("/api/regulatory/trace", async (req, res) => res.json(await traverseControlledRegulatoryTree(typeof req.query.findingId === "string" ? req.query.findingId : undefined)));
   app.get("/api/regulatory/impact", async (req, res) => res.json(await assessControlledRemediationImpact(typeof req.query.findingId === "string" ? req.query.findingId : undefined)));
