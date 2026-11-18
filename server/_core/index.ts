@@ -21,6 +21,7 @@ import { approveWorkbookImport, compareSnapshots, getExcelAdapterStatus, importW
 import { handleMcpJsonRpc } from "../mcp-protocol";
 import { getEventStoreStatus, listAssuranceEvents } from "../event-store";
 import { runWeeklySourceSync } from "../weekly-sync";
+import { getDocumentControlStatus, listControlledDocuments, notarizeDocumentWithHederaDemo, registerControlledDocument, reviewDocumentCybersecurity } from "../document-control";
 import { createContext } from "./context";
 import { serveStatic, setupVite } from "./vite";
 
@@ -54,6 +55,11 @@ async function startServer() {
   app.post("/api/sync/weekly", (req, res) => res.json(runWeeklySourceSync(String(req.body?.actor ?? "Application weekly scheduler"))));
   app.get("/api/approvals/pending", (_req, res) => res.json({ approvalStatus: "pending_human_review", items: listPendingWorkbookApprovals(), humanGate: "Qualified reviewer must inspect source provenance and revision diff before approval." }));
   app.post("/api/approvals/workbooks/:workbookId", (req, res) => res.json(approveWorkbookImport(req.params.workbookId, String(req.body?.actor ?? "Quality approver"), String(req.body?.note ?? "Approved after human review"))));
+  app.get("/api/document-control/status", (_req, res) => res.json(getDocumentControlStatus()));
+  app.get("/api/documents", (req, res) => res.json({ documents: listControlledDocuments({ auditId: typeof req.query.auditId === "string" ? req.query.auditId : undefined }) }));
+  app.post("/api/documents", (req, res) => res.json(registerControlledDocument(req.body ?? {})));
+  app.post("/api/documents/:documentId/cybersecurity-review", (req, res) => res.json(reviewDocumentCybersecurity(req.params.documentId, req.body ?? {})));
+  app.post("/api/documents/:documentId/notarize", (req, res) => res.json(notarizeDocumentWithHederaDemo(req.params.documentId, String(req.body?.actor ?? "Quality approver"))));
   app.get("/api/admin/excel/status", (_req, res) => res.json(getExcelAdapterStatus()));
   app.get("/api/admin/excel/samples", (_req, res) => res.json(listSampleWorkbooks()));
   app.get("/api/admin/excel/last", (_req, res) => res.json(readWorkbookSample()));
