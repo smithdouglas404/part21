@@ -83,3 +83,15 @@ export function getPolicyCoverage(auditId = "AUD-026") {
   const audit = audits.find((item) => item.id === auditId) ?? audits[0];
   return { auditId, audit, evaluation, uncoveredRules: evaluation.results.filter((item) => item.disposition !== "covered").map((item) => ({ id: item.rule.id, citation: item.rule.citation, title: item.rule.title, requiredEvidence: item.rule.requiredEvidence, humanGate: item.rule.humanGate })) };
 }
+
+export function compileDocumentToPolicy(documentId = "10-cfr-part-21") {
+  return {
+    documentId,
+    mode: "semantic-policy-compiler-demo",
+    provider: "deterministic source-linked compiler · LLM not invoked",
+    pipeline: ["segment authoritative document", "extract obligations and conditions", "map concepts to assurance ontology", "generate rule candidates", "attach evidence and human gates", "run reviewer acceptance before activation"],
+    candidateRules: part21PolicyPack.rules.map((rule) => ({ id: rule.id, citation: rule.citation, intent: rule.intent, evidence: rule.requiredEvidence, evaluator: rule.evaluator, humanGate: rule.humanGate, confidence: rule.sourceSectionId === "21.21" || rule.sourceSectionId === "21.51" || rule.sourceSectionId === "21.61" ? 0.96 : 0.88, activation: "pending human approval" })),
+    sourceProvenance: { sourceDocument: part21PolicyPack.sourceDocument, sourceUri: part21PolicyPack.sourceUri, policyVersion: part21PolicyPack.policyVersion },
+    warning: "Generated candidates are not a compliance conclusion. A client-approved interpretation, legal review, and controlled activation are required.",
+  };
+}

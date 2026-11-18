@@ -1,4 +1,4 @@
-export type ViewId = "overview" | "audit" | "graph" | "evidence" | "controls" | "skills" | "policy" | "regulatory" | "roles" | "agents" | "data";
+export type ViewId = "overview" | "audit" | "graph" | "evidence" | "controls" | "skills" | "policy" | "governance" | "regulatory" | "roles" | "agents" | "data";
 
 export type EntityType = "requirement" | "product" | "supplier" | "evidence" | "person" | "change" | "finding";
 
@@ -181,6 +181,7 @@ export const mcpTools: McpToolDefinition[] = [
   { name: "policy_evaluate", group: "Policy as code", description: "Evaluate a finding against versioned Part 21 rules and return coverage, gaps, provenance, and human gates.", example: "{ findingId: 'FIND-2026-04', asOf: '2026-11-17' }" },
   { name: "policy_coverage", group: "Policy as code", description: "Show which Part 21 policy rules are covered, partial, or gaps for an audit.", example: "{ auditId: 'AUD-026' }" },
   { name: "policy_graph", group: "Policy as code", description: "Traverse the semantic policy graph from source document to rule, evaluator, evidence, and human gate.", example: "{}" },
+  { name: "policy_compile", group: "Policy as code", description: "Compile a source document into versioned rule candidates with confidence, provenance, and human activation gates.", example: "{ documentId: '10-cfr-part-21' }" },
   { name: "trace_product_genealogy", group: "Trace", description: "Walk upstream and downstream relationships from a product, lot, component, or controlled activity.", example: "{ productId: 'NSS-4820', depth: 3 }" },
   { name: "compare_temporal_versions", group: "Change", description: "Compare entity state across effective dates and return potential causes, impacts, and involved people.", example: "{ entityId: 'NSS-4820', from: '2025-01-01', to: '2026-04-14' }" },
   { name: "check_audit_readiness", group: "Assure", description: "Calculate evidence coverage, stale records, open findings, and unresolved control gaps for an audit scope.", example: "{ auditId: 'AUD-026' }" },
