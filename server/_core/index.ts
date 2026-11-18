@@ -7,6 +7,7 @@ import { publicPlatformScript } from "./publicConfig";
 import { appRouter } from "../routers";
 import { callMcpTool, getMcpManifest } from "../mcp";
 import { buildAuditReadinessReport, exportBitemporalGraph, finalizeAuditReport, getAgentActivity, getAgentKitManifest, reportToCsv, runAuditSkill, simulateCustomAuditExecution, simulateFullAuditExecution } from "../agentkit";
+import { approveRoutedFinalReport, listReportApprovalTasks, routeFinalReportApproval } from "../report-approval";
 import { ontologyStorageStatus, syncOntologySnapshot } from "../ontology-store";
 import { getReportDraft, registerEvidence } from "../evidence";
 import { assessControlledRemediationImpact, getControlledRegulatoryPack, traverseControlledRegulatoryTree } from "../regulatory-runtime";
@@ -96,6 +97,9 @@ async function startServer() {
   app.post("/api/evidence/intake", async (req, res) => res.json(await registerEvidence(req.body ?? {})));
   app.get("/api/reports/draft", async (req, res) => res.json(await getReportDraft(typeof req.query.findingId === "string" ? req.query.findingId : undefined)));
   app.post("/api/reports/finalize", async (req, res) => { try { res.json(await finalizeAuditReport(String(req.body?.auditId ?? ""), String(req.body?.actor ?? "Qualified report approver"), String(req.body?.auditorNarrative ?? ""), req.body?.approved === true)); } catch (error) { res.status(409).json({ ok: false, error: error instanceof Error ? error.message : "Report finalization blocked", authoritativeGraphWrite: false }); } });
+  app.post("/api/reports/:auditId/approval-route", async (req, res) => { try { res.json(await routeFinalReportApproval(req.params.auditId, String(req.body?.personaId ?? ""), String(req.body?.routedBy ?? "Audit workflow"), String(req.body?.note ?? "Final report requires qualified human disposition."))); } catch (error) { res.status(409).json({ ok: false, error: error instanceof Error ? error.message : "Report routing failed" }); } });
+  app.get("/api/reports/approvals", async (req, res) => res.json(await listReportApprovalTasks(typeof req.query.auditId === "string" ? req.query.auditId : undefined)));
+  app.post("/api/reports/approvals/:approvalId/approve", async (req, res) => { try { res.json(await approveRoutedFinalReport(req.params.approvalId, String(req.body?.actor ?? ""), String(req.body?.note ?? ""))); } catch (error) { res.status(409).json({ ok: false, error: error instanceof Error ? error.message : "Report approval failed", authoritativeGraphWrite: false }); } });
   app.get("/api/regulatory/pack", async (_req, res) => res.json(await getControlledRegulatoryPack()));
   app.get("/api/regulatory/trace", async (req, res) => res.json(await traverseControlledRegulatoryTree(typeof req.query.findingId === "string" ? req.query.findingId : undefined)));
   app.get("/api/regulatory/impact", async (req, res) => res.json(await assessControlledRemediationImpact(typeof req.query.findingId === "string" ? req.query.findingId : undefined)));

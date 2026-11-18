@@ -500,4 +500,22 @@ kbd { margin-left: auto; border: 1px solid #2d4358; padding: 2px 5px; border-rad
 .agent-skill-used strong { display:block; color:#f5f9ff; font-size:14px; margin-bottom:4px; }
 .agent-skill-used p { margin:0 0 7px; color:#aebfd4; font-size:12px; line-height:1.5; }
 .agent-skill-used small { display:block; color:#7890ad; font-size:10px; line-height:1.5; }
+.report-approval-panel { border-color: rgba(242,184,91,.24); }
+.report-approval-controls { display:grid; grid-template-columns: 1fr 1.6fr auto; gap:12px; align-items:end; }
+.report-approval-controls label { display:flex; flex-direction:column; gap:6px; color:#9eb3cc; font-size:11px; }
+.report-approval-controls select, .report-approval-controls textarea { width:100%; box-sizing:border-box; border:1px solid rgba(143,170,203,.2); border-radius:8px; background:#0c1726; color:#edf5ff; padding:9px 10px; font:inherit; }
+.report-approval-controls textarea { resize:vertical; min-height:58px; }
+.report-approval-actions { display:flex; gap:8px; align-items:center; }
+.report-route-summary, .report-approval-task, .report-finalization-result { display:flex; gap:10px; align-items:center; margin-top:12px; padding:10px 12px; border-radius:8px; background:rgba(89,216,232,.06); border:1px solid rgba(89,216,232,.14); color:#aebfd4; font-size:12px; }
+.report-route-summary { flex-wrap:wrap; }
+.report-route-summary strong { color:#f5f9ff; }
+.report-route-summary span { color:#b7c9dc; }
+.report-route-summary small { width:100%; color:#7890ad; }
+.report-approval-task { justify-content:space-between; }
+.report-approval-task b { color:#f5f9ff; }
+.report-finalization-result { border-color:rgba(99,216,160,.3); color:#63d8a0; }
+.report-finalization-result > div { display:flex; flex-direction:column; gap:3px; }
+.report-finalization-result strong { color:#c9ffe1; }
+.report-finalization-result small { color:#8fc8a8; word-break:break-all; }
+@media (max-width: 900px) { .report-approval-controls { grid-template-columns:1fr; } .report-approval-actions { flex-wrap:wrap; } }
 
