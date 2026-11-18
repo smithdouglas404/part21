@@ -66,6 +66,20 @@ function publicOrigin(req: Request) {
   return `${forwardedProto}://${forwardedHost || req.get("host")}`;
 }
 
+async function temporalSupervisorHealth(): Promise<{ reachable: boolean; workerState?: string; lastOutboxSuccessAt?: string | null; lastOutboxError?: string | null }> {
+  const host = process.env.TEMPORAL_HEALTH_HOST || "127.0.0.1";
+  const port = process.env.TEMPORAL_HEALTH_PORT || "8090";
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 1500);
+    const response = await fetch(`http://${host}:${port}/health`, { signal: controller.signal });
+    clearTimeout(timer);
+    if (!response.ok) return { reachable: false };
+    const body = (await response.json()) as any;
+    return { reachable: Boolean(body?.ready), workerState: body?.workerState, lastOutboxSuccessAt: body?.lastOutboxSuccessAt ?? null, lastOutboxError: body?.lastOutboxError ?? null };
+  } catch { return { reachable: false }; }
+}
+
 async function startServer() {
   const app = express();
   const server = createServer(app);
@@ -300,7 +314,7 @@ async function startServer() {
         auditId: auditId || null,
         source: "mysql-database",
         regulatorySource: snapshot ? { ingested: true, snapshotId: snapshot.id, sourceAsOf: snapshot.sourceAsOf, latestAmendedOn: snapshot.latestAmendedOn, providerUpToDateAsOf: snapshot.providerUpToDateAsOf, provisions: snapshot.provisions.length, citationsVerified: verification?.verified ?? 0, citationsMismatched: verification?.mismatched ?? 0 } : { ingested: false, note: "No official source snapshot has been ingested; citations must not be presented as current law." },
-        temporal: { installed: true, workflow: "Part21CaseWorkflow", timers: ["60 calendar days — evaluation and interim report", "30 days — written notification", "2 days — initial notification"], serviceConfigured: Boolean(process.env.TEMPORAL_ADDRESS && process.env.TEMPORAL_NAMESPACE && process.env.TEMPORAL_TASK_QUEUE), running: false, handoff: { ready: false, blockers: ["approved policy snapshot (approvalDecisionId)", "approved calendar snapshot (approvalDecisionId)", "discovery decision with evidence (discoveryDecisionId)"] }, note: "The workflow, deadline store and worker are installed and proven against a real Temporal server in tests. Production has no Temporal service, and no case can hand off until approved policy and calendar snapshots exist, so statutory clocks are currently computed on read rather than supervised by durable timers." },
+        temporal: { installed: true, workflow: "Part21CaseWorkflow", timers: ["60 calendar days — evaluation and interim report", "30 days — written notification", "2 days — initial notification"], serviceConfigured: Boolean(process.env.TEMPORAL_ADDRESS && process.env.TEMPORAL_NAMESPACE && process.env.TEMPORAL_TASK_QUEUE), running: (await temporalSupervisorHealth()).reachable, handoff: { ready: false, blockers: ["approved policy snapshot (approvalDecisionId)", "approved calendar snapshot (approvalDecisionId)", "discovery decision with evidence (discoveryDecisionId)"] }, note: "The workflow, deadline store and worker are installed and proven against a real Temporal server in tests. Production has no Temporal service, and no case can hand off until approved policy and calendar snapshots exist, so statutory clocks are currently computed on read rather than supervised by durable timers." },
         evidenceVault: { originalBytes: "mysql", objectLock: process.env.S3_OBJECT_LOCK_BUCKET ? "configured" : "not-configured", immudb: process.env.IMMUDB_ADDRESS ? "configured" : "not-configured", note: "A SHA-256 hash is not WORM protection. External Object Lock and immudb verification are not active." },
         part21Cases: { auditScoped: cases.length, clockModel: "event-triggered branches computed from recorded facts", calendarApproval: "not-approved-for-reliance" },
         humanReviewRequired: true,

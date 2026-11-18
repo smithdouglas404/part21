@@ -15,7 +15,9 @@
     "db:push": "drizzle-kit generate && drizzle-kit migrate",
     "db:migrate": "drizzle-kit migrate",
     "dev:static": "vite --host 0.0.0.0 --port ${PORT:-3000} --strictPort",
-    "build:static": "vite build"
+    "build:static": "vite build",
+    "build:temporal": "tsx server/temporal/build.ts",
+    "start:stack": "bash scripts/start-stack.sh"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1164.0",
