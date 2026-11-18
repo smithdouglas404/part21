@@ -12,6 +12,7 @@ import { getReportDraft, registerEvidence } from "../evidence";
 import { assessRemediationImpact, part21RegulatoryPack, traverseRegulatoryTree } from "../../shared/regulatory";
 import { answerGroundedQuestion, configureAiProvider, getAiStatus } from "../ai";
 import { getEccCatalog } from "../../shared/ecc";
+import { buildPolicyGraph, evaluatePart21Policy, getPolicyCoverage, part21PolicyPack } from "../../shared/policy";
 import { createContext } from "./context";
 import { serveStatic, setupVite } from "./vite";
 
@@ -59,6 +60,10 @@ async function startServer() {
   app.post("/api/ai/ask", (req, res) => res.json(answerGroundedQuestion(String(req.body?.question ?? ""))));
   app.post("/api/ai/config", (req, res) => res.json(configureAiProvider(req.body?.provider === "anthropic" ? "anthropic" : "openai", String(req.body?.key ?? ""))));
   app.get("/api/ecc/catalog", (_req, res) => res.json(getEccCatalog()));
+  app.get("/api/policy/part21", (_req, res) => res.json(part21PolicyPack));
+  app.get("/api/policy/graph", (_req, res) => res.json(buildPolicyGraph()));
+  app.get("/api/policy/coverage", (req, res) => res.json(getPolicyCoverage(String(req.query.auditId ?? "AUD-026"))));
+  app.post("/api/policy/evaluate", (req, res) => res.json(evaluatePart21Policy(String(req.body?.findingId ?? "FIND-2026-04"), String(req.body?.asOf ?? new Date().toISOString().slice(0, 10)))));
   app.get("/api/ontology/storage", async (_req, res) => {
     res.json(await ontologyStorageStatus());
   });

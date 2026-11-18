@@ -17,7 +17,7 @@ export interface AuditSkill {
   purpose: string;
   agent: string;
   route: string;
-  eccContract: string;
+  skillContract: string;
   humanGate: string;
   questions: AuditQuestion[];
   completionSignal: string;
@@ -48,7 +48,7 @@ export const auditSkills: AuditSkill[] = [
     purpose: "Turn an audit request into a bounded, reviewable scope with explicit accountability.",
     agent: "scope-facilitator",
     route: "agentkit.audit.scope_framing",
-    eccContract: "ECC-SCOPE-01",
+    skillContract: "P21-SKILL-SCOPE-01",
     humanGate: "Audit lead confirms scope and accountable owner.",
     questions: [
       { id: "scope-object", prompt: "What product, facility, process, or change is in scope?", helper: "Name the object employees would put on the audit cover sheet.", input: "text", required: true, evidenceHint: "Create or link the scope anchor in the graph." },
@@ -64,7 +64,7 @@ export const auditSkills: AuditSkill[] = [
     purpose: "Guide an employee through evidence retrieval without hiding freshness, provenance, or gaps.",
     agent: "evidence-curator",
     route: "agentkit.audit.evidence_intake",
-    eccContract: "ECC-EVIDENCE-02",
+    skillContract: "P21-SKILL-EVIDENCE-02",
     humanGate: "Evidence owner confirms that the source set is complete enough to review.",
     questions: [
       { id: "evidence-sources", prompt: "Which source systems or controlled records should be queried?", helper: "Include quality, document control, supplier, role, and field sources where relevant.", input: "checklist", options: ["Quality system of record", "Document control", "Supplier portal", "People & delegated roles", "Field / maintenance data"], required: true, evidenceHint: "Create source coverage links and freshness checks." },
@@ -80,7 +80,7 @@ export const auditSkills: AuditSkill[] = [
     purpose: "Walk the employee through upstream and downstream links until each conclusion has a defensible path.",
     agent: "genealogy-navigator",
     route: "agentkit.audit.trace_chain",
-    eccContract: "ECC-TRACE-03",
+    skillContract: "P21-SKILL-TRACE-03",
     humanGate: "Quality reviewer accepts the trace boundary and unresolved edges.",
     questions: [
       { id: "trace-anchor", prompt: "Which product, lot, component, or change should be traced first?", helper: "Start with the object that carries the highest consequence or uncertainty.", input: "text", required: true, evidenceHint: "Open the selected entity in the knowledge graph." },
@@ -96,7 +96,7 @@ export const auditSkills: AuditSkill[] = [
     purpose: "Help an employee challenge a signal before drafting a finding and preserve the reasoning trail.",
     agent: "finding-challenger",
     route: "agentkit.audit.finding_challenge",
-    eccContract: "ECC-FINDING-04",
+    skillContract: "P21-SKILL-FINDING-04",
     humanGate: "Accountable audit lead approves severity, wording, and owner before issue.",
     questions: [
       { id: "finding-signal", prompt: "What signal or condition needs to be evaluated?", helper: "Bring forward an agent alert, evidence gap, interview note, or observed condition.", input: "text", required: true, evidenceHint: "Link the signal to one or more source records." },
@@ -112,7 +112,7 @@ export const auditSkills: AuditSkill[] = [
     purpose: "Prepare a reportable readiness position while clearly separating facts, recommendations, and human decisions.",
     agent: "readiness-facilitator",
     route: "agentkit.audit.readiness_close",
-    eccContract: "ECC-CLOSE-05",
+    skillContract: "P21-SKILL-CLOSE-05",
     humanGate: "Audit lead and quality approver accept the report disposition.",
     questions: [
       { id: "close-position", prompt: "What is the readiness position you are prepared to defend?", helper: "Use ready, ready with actions, or not ready; explain the boundary.", input: "choice", options: ["Ready", "Ready with actions", "Not ready"], required: true, evidenceHint: "Bind the position to coverage and open finding facts." },

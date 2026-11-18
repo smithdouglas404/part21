@@ -12,6 +12,7 @@ import {
 } from "../shared/demo";
 import { getFindingOntologyContext, getTemporalHistory, part21Ontology, resolveOntology } from "../shared/ontology";
 import { assessRemediationImpact, part21RegulatoryPack, traverseRegulatoryTree } from "../shared/regulatory";
+import { evaluatePart21Policy, getPolicyCoverage, buildPolicyGraph } from "../shared/policy";
 
 export function getMcpManifest() {
   return {
@@ -43,6 +44,12 @@ export function callMcpTool(name: string, args: Record<string, unknown> = {}) {
       return traverseRegulatoryTree(String(args.findingId ?? "FIND-2026-04"));
     case "assess_remediation_impact":
       return assessRemediationImpact(String(args.findingId ?? "FIND-2026-04"));
+    case "policy_evaluate":
+      return evaluatePart21Policy(String(args.findingId ?? "FIND-2026-04"), String(args.asOf ?? new Date().toISOString().slice(0, 10)));
+    case "policy_coverage":
+      return getPolicyCoverage(String(args.auditId ?? "AUD-026"));
+    case "policy_graph":
+      return buildPolicyGraph();
     case "recommend_remediation": {
       const impact = assessRemediationImpact(String(args.findingId ?? "FIND-2026-04"));
       return { ...impact, recommendationBasis: "Part 21 source pack + client-approved interpretation overlay required", sourceLinks: part21RegulatoryPack.sources, recommendations: impact.remediation.map((step, index) => ({ priority: index + 1, action: step, evidenceToClose: "Attach source record and accountable approval", humanGate: "Compliance / quality approval required" })) };

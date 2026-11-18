@@ -3,12 +3,14 @@ import { auditPhases, auditSkills, agentKitAgents, getSkillForPhase } from "../s
 import { mcpConnectors, simulatedFinding, type SimulationStep } from "../shared/execution";
 import { getFindingOntologyContext, ontologyMappings, part21Ontology, temporalRecords } from "../shared/ontology";
 import { assessRemediationImpact, part21RegulatoryPack, traverseRegulatoryTree } from "../shared/regulatory";
+import { getEccCatalog } from "../shared/ecc";
+import { part21PolicyPack } from "../shared/policy";
 
 export function getAgentKitManifest() {
   return {
     protocol: "agentkit-demo",
     version: "0.1.0",
-    executionContract: "ECC = Evidence, Context, Checkpoint",
+    executionContract: { standard: "ECC-compatible open-source skill module", source: getEccCatalog().repository, localSkillPack: getEccCatalog().localPack },
     agents: agentKitAgents,
     skills: auditSkills.map(({ questions, ...skill }) => ({ ...skill, questionCount: questions.length })),
     phases: auditPhases,
@@ -16,6 +18,7 @@ export function getAgentKitManifest() {
     ontology: { id: part21Ontology.id, version: part21Ontology.version, temporalModel: part21Ontology.temporalModel, classCount: part21Ontology.classes.length, relationCount: part21Ontology.relations.length },
     storage: { provider: "PostgreSQL", connectionEnv: "POSTGRES_URL", tables: ["ontology_entities", "ontology_relationships", "temporal_events", "audit_decisions"], syncEndpoint: "/api/ontology/sync" },
     regulatoryPack: { id: part21RegulatoryPack.id, title: part21RegulatoryPack.title, sectionCount: part21RegulatoryPack.sections.length, sources: part21RegulatoryPack.sources, clientInterpretationRequired: true },
+    policyAsCode: { id: part21PolicyPack.id, version: part21PolicyPack.policyVersion, ruleCount: part21PolicyPack.rules.length, sourceUri: part21PolicyPack.sourceUri },
   };
 }
 
@@ -80,7 +83,7 @@ export function runAuditSkill(skillId: string, answers: Record<string, unknown> 
     agent: skill.agent,
     status: answered >= required ? "ready_for_human_gate" : "needs_more_context",
     completion: Math.round((answered / skill.questions.length) * 100),
-    ecc: { contract: skill.eccContract, evidence: "linked synthetic records", context: skill.purpose, checkpoint: skill.humanGate },
+    skillContract: { id: skill.skillContract, evidence: "linked synthetic records", context: skill.purpose, humanGate: skill.humanGate },
     nextQuestions: skill.questions.filter((question) => question.required && !answers[question.id]).map((question) => question.id),
     recommendation: answered >= required ? skill.completionSignal : `Answer the remaining ${Math.max(required - answered, 0)} required question(s) before routing to the human gate.`,
   };
