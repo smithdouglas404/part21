@@ -36,10 +36,15 @@ import { createContext } from "./context";
 import { serveStatic, setupVite } from "./vite";
 
 async function respondToConnectedTool(req: Request, res: Response, tool: string) {
-  const body = req.body && typeof req.body === "object" ? { ...req.body } as Record<string, unknown> : {};
-  const result = await callConnectedTool(req, tool, body, body.confirm === true);
-  if ("status" in result && result.status !== undefined) return res.status(result.status).json(result);
-  return res.json(result);
+  try {
+    const body = req.body && typeof req.body === "object" ? { ...req.body } as Record<string, unknown> : {};
+    const result = await callConnectedTool(req, tool, body, body.confirm === true);
+    if ("status" in result && result.status !== undefined) return res.status(result.status).json(result);
+    return res.json(result);
+  } catch (error) {
+    console.error(`[Connector] ${tool} failed`, error);
+    return res.status(503).json({ ok: false, error: error instanceof Error ? error.message : "Connector tool unavailable", tool, databaseGroundingRequired: true, retryable: true });
+  }
 }
 
 function firstForwardedValue(value: string | string[] | undefined) {

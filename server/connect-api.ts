@@ -78,6 +78,13 @@ export async function authenticateConnectRequest(req: Request) {
 export async function callConnectedTool(req: Request, tool: string, args: Record<string, unknown>, confirm = false) {
   const auth = await authenticateConnectRequest(req);
   if (!auth.ok) return auth;
+  if (!args.auditId) {
+    const alias = args.audit_id ?? args.auditID ?? (typeof args.audit === "string" ? args.audit : undefined);
+    if (typeof alias === "string" && alias.trim()) args.auditId = alias.trim();
+  }
+  if (["field_kanban_list", "field_kanban_create", "field_kanban_attach", "check_audit_readiness"].includes(tool) && !String(args.auditId ?? "").trim() && !auth.token.auditId) {
+    return { ok: false as const, status: 400, error: "auditId is required for this tool. Select an audit and resend the request with its database auditId, for example AUD-026." };
+  }
   if (auth.token.access === "look_only" && writeTools.has(tool)) return { ok: false as const, status: 403, error: "This connector is look-only; a make-changes token is required." };
   if (auth.token.auditId && typeof args.auditId === "string" && args.auditId !== auth.token.auditId) return { ok: false as const, status: 404, error: "Audit is outside this connector's customer scope." };
   if (auth.token.auditId && !args.auditId && ["field_kanban_create", "field_kanban_attach"].includes(tool)) args.auditId = auth.token.auditId;
