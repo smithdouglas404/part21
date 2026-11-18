@@ -25,6 +25,7 @@ import { approveWorkbookImport, compareSnapshots, getExcelAdapterStatus, importW
 import { handleMcpJsonRpc } from "../mcp-protocol";
 import { getEventStoreStatus, listAssuranceEvents } from "../event-store";
 import { runWeeklySourceSync } from "../weekly-sync";
+import { callConnectedTool, connectOpenApi, createConnectToken, listConnectTokens } from "../connect-api";
 import { generateSyntheticPart21Decision, getDocumentControlStatus, listControlledDocuments, notarizeDocumentWithHederaDemo, registerControlledDocument, reviewDocumentCybersecurity } from "../document-control";
 import { getGroundedGraphContext, getGraphStoreStatus, validateGraphOntology } from "../graph-store";
 import { getDomainPortfolio, getDomainStoreStatus, listAudits } from "../domain-store";
@@ -55,6 +56,24 @@ async function startServer() {
     const name = typeof req.body?.name === "string" ? req.body.name : "";
     const args = req.body?.arguments && typeof req.body.arguments === "object" ? req.body.arguments : {};
     res.json({ tool: name, data: await callMcpTool(name, args) });
+  });
+  app.get("/api/mcp", (_req, res) => res.json({ name: "part21-assurance-os", endpoint: "/api/mcp", transport: "Streamable HTTP", protocol: "MCP JSON-RPC 2.0" }));
+  app.post("/api/mcp", async (req, res) => {
+    const payload = req.body;
+    const result = Array.isArray(payload) ? (await Promise.all(payload.map(handleMcpJsonRpc))).filter(Boolean) : await handleMcpJsonRpc(payload);
+    if (result === null || (Array.isArray(result) && result.length === 0)) return res.status(202).end();
+    res.type("application/json").json(result);
+  });
+  app.get("/api/v1/openapi.json", (req, res) => res.json(connectOpenApi(typeof process.env.STUDIO_PUBLIC_URL === "string" ? process.env.STUDIO_PUBLIC_URL : `${req.protocol}://${req.get("host")}`)));
+  app.post("/api/v1/connect/tokens", async (req, res) => {
+    if (process.env.CONNECT_ADMIN_KEY && req.headers["x-connect-admin-key"] !== process.env.CONNECT_ADMIN_KEY) return res.status(403).json({ error: "Connector administration key required." });
+    res.json(await createConnectToken({ label: String(req.body?.label ?? "Meta Muse"), actor: String(req.body?.actor ?? ""), role: String(req.body?.role ?? ""), auditId: req.body?.auditId ? String(req.body.auditId) : undefined, access: req.body?.access === "make_changes" ? "make_changes" : "look_only" }));
+  });
+  app.get("/api/v1/connect/tokens", async (_req, res) => res.json({ tokens: await listConnectTokens() }));
+  app.post("/api/v1/tools/:tool", async (req, res) => {
+    const result = await callConnectedTool(req, req.params.tool, req.body && typeof req.body === "object" ? { ...req.body } : {}, req.body?.confirm === true);
+    if ("status" in result && result.status !== undefined) return res.status(result.status).json(result);
+    res.json(result);
   });
   app.get("/mcp", (_req, res) => res.json({ name: "part21-assurance-os", endpoint: "/mcp", transport: "Streamable HTTP", protocol: "MCP JSON-RPC 2.0", instructions: "POST initialize, tools/list, tools/call, resources/list, or resources/read requests to this endpoint." }));
   app.post("/mcp", async (req, res) => {
