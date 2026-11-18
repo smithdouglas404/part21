@@ -46,11 +46,25 @@ export async function getGroundedGraphContext(findingId?: string) {
   const [edges] = await db.query<any[]>(`SELECT id, from_id AS \`from\`, to_id AS \`to\`, relation, label, payload FROM part21_graph_edges ORDER BY id`);
   const [events] = await db.query<any[]>(`SELECT entity_id AS entityId, valid_from AS validFrom, valid_to AS validTo, recorded_at AS recordedAt, recorded_by AS recordedBy, operation, payload FROM part21_graph_events ORDER BY valid_from, recorded_at`);
   const hydratedNodes = nodes.map((node) => ({ ...node, ...parseJson(node.payload) }));
-  const resolvedFindingId = findingId || hydratedNodes.find((node) => String(node.type).toLowerCase() === "finding")?.id;
-  if (!resolvedFindingId) throw new Error("No persisted finding node is available for grounded analysis.");
+  const requestedNode = findingId ? hydratedNodes.find((node) => String(node.type).toLowerCase() === "finding" && (node.id === findingId || node.label === findingId || node.payload?.id === findingId)) : undefined;
+  const graphFindingId = requestedNode?.id ?? (findingId ? undefined : hydratedNodes.find((node) => String(node.type).toLowerCase() === "finding")?.id);
+  if (!graphFindingId) throw new Error(`Finding ${findingId ?? "(unspecified)"} exists in the domain database but has no persisted knowledge-graph node. Ingest the finding before requesting graph-grounded analysis.`);
   const hydratedEdges = edges.map((edge) => ({ ...edge, ...parseJson(edge.payload) }));
-  const temporalEvents = events.map((event) => ({ ...event, payload: parseJson(event.payload) }));
-  return { ...status, findingId: resolvedFindingId, schema: graphSchema, ontologyVersion: ontology.version, nodes: hydratedNodes, edges: hydratedEdges, temporalEvents, sourceIds: hydratedNodes.map((node) => node.id), traversalProof: { queryFindingId: resolvedFindingId, visitedNodeIds: hydratedNodes.map((node) => node.id), traversedEdgeIds: hydratedEdges.map((edge) => edge.id), temporalEventIds: temporalEvents.map((event) => event.entityId), source: "mysql-database" } };
+  const connected = new Set([graphFindingId]);
+  let expanded = true;
+  while (expanded) {
+    expanded = false;
+    for (const edge of hydratedEdges) {
+      if (connected.has(edge.from) || connected.has(edge.to)) {
+        if (!connected.has(edge.from) || !connected.has(edge.to)) expanded = true;
+        connected.add(edge.from); connected.add(edge.to);
+      }
+    }
+  }
+  const scopedNodes = hydratedNodes.filter((node) => connected.has(node.id));
+  const scopedEdges = hydratedEdges.filter((edge) => connected.has(edge.from) && connected.has(edge.to));
+  const temporalEvents = events.map((event) => ({ ...event, payload: parseJson(event.payload) })).filter((event) => connected.has(event.entityId));
+  return { ...status, findingId: findingId ?? graphFindingId, graphFindingId, schema: graphSchema, ontologyVersion: ontology.version, nodes: scopedNodes, edges: scopedEdges, temporalEvents, sourceIds: scopedNodes.map((node) => node.id), traversalProof: { queryFindingId: findingId ?? graphFindingId, visitedNodeIds: scopedNodes.map((node) => node.id), traversedEdgeIds: scopedEdges.map((edge) => edge.id), temporalEventIds: temporalEvents.map((event) => event.entityId), source: "mysql-database", scope: "finding-connected component within active database audit context" } };
 }
 
 export async function validateGraphOntology() {

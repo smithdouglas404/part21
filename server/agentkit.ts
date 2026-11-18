@@ -32,8 +32,17 @@ export async function getAgentKitManifest() {
 
 export async function simulateFullAuditExecution(findingId?: string): Promise<{ finding: Record<string, unknown>; status: "completed"; steps: SimulationStep[] }> {
   const audits = await listAudits();
-  const portfolio = await getDomainPortfolio(String((audits as any[])[0]?.id ?? ""));
-  const finding = (portfolio.findings as any[]).find((item) => !findingId || item.id === findingId) ?? (portfolio.findings as any[])[0];
+  let portfolio: any = null;
+  let selectedFinding: any = null;
+  for (const candidate of audits as any[]) {
+    const candidatePortfolio = await getDomainPortfolio(candidate.id);
+    for (const candidateFinding of candidatePortfolio.findings as any[]) {
+      if (findingId && candidateFinding.id !== findingId) continue;
+      try { await getGroundedGraphContext(candidateFinding.id); selectedFinding = candidateFinding; portfolio = candidatePortfolio; break; } catch { /* continue to the next persisted database finding */ }
+    }
+    if (selectedFinding) break;
+  }
+  const finding = selectedFinding;
   if (!finding) throw new Error("No database finding is available for AgentKit execution.");
   const graph = await getGroundedGraphContext(finding.id);
   const audit = portfolio.audit as any;

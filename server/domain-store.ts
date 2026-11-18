@@ -49,7 +49,17 @@ export async function getDomainPortfolio(auditId?: string) {
 }
 
 export async function listAudits() {
-  return listDomainRecords("audit");
+  await ensureDomainStore();
+  const db = getPool();
+  const [auditRows] = await db.query<any[]>("SELECT record_id AS recordId, audit_id AS auditId, payload FROM part21_domain_records WHERE record_type='audit' ORDER BY updated_at DESC");
+  const [countRows] = await db.query<any[]>("SELECT audit_id AS auditId, record_type AS recordType, COUNT(*) AS count FROM part21_domain_records WHERE audit_id IS NOT NULL GROUP BY audit_id, record_type");
+  const counts = new Map<string, Record<string, number>>();
+  for (const row of countRows) counts.set(row.auditId, { ...(counts.get(row.auditId) ?? {}), [row.recordType]: Number(row.count) });
+  return auditRows.map((row) => {
+    const audit = typeof row.payload === "string" ? JSON.parse(row.payload) : row.payload;
+    const linked = counts.get(row.recordId) ?? {};
+    return { ...audit, findings: linked.finding ?? 0, evidence: `${linked.evidence ?? 0} linked database records` };
+  });
 }
 
 export async function getDomainStoreStatus() {

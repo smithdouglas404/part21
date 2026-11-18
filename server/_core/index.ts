@@ -89,7 +89,7 @@ async function startServer() {
       findingId: String(req.body?.findingId ?? "FIND-CUSTOM-01"), title: String(req.body?.title ?? "Custom audit condition"), productId: String(req.body?.productId ?? "NSS-4820"), supplierId: String(req.body?.supplierId ?? "SUP-044"), controlFamily: String(req.body?.controlFamily ?? "21.51 traceability"), alternateConnector: req.body?.alternateConnector === "document-repository-live" ? "document-repository-live" : "vendor-erp-asterion",
     }));
   });
-  app.get("/api/agentkit/activity", async (req, res) => res.json({ agents: await getAgentActivity(typeof req.query.agentId === "string" ? req.query.agentId : undefined) }));
+  app.get("/api/agentkit/activity", async (req, res) => { try { res.json({ agents: await getAgentActivity(typeof req.query.agentId === "string" ? req.query.agentId : undefined) }); } catch (error) { res.status(503).json({ ok: false, error: error instanceof Error ? error.message : "Agent activity unavailable", databaseGroundingRequired: true }); } });
   app.get("/api/agentkit/manifest.json", async (_req, res) => res.json(await getAgentKitManifest()));
   app.get("/api/graph/export", async (req, res) => res.json(await exportBitemporalGraph(typeof req.query.findingId === "string" ? req.query.findingId : undefined)));
   app.post("/api/evidence/intake", async (req, res) => res.json(await registerEvidence(req.body ?? {})));
@@ -100,12 +100,19 @@ async function startServer() {
   app.get("/api/ai/status", (_req, res) => res.json(getAiStatus()));
   app.get("/api/graph/store/status", async (_req, res) => res.json(await getGraphStoreStatus()));
   app.get("/api/graph/ontology-validation", async (_req, res) => res.json(await validateGraphOntology()));
-  app.get("/api/graph/context", async (req, res) => res.json(await getGroundedGraphContext(typeof req.query.findingId === "string" ? req.query.findingId : "")));
+  app.get("/api/graph/context", async (req, res) => { try { res.json(await getGroundedGraphContext(typeof req.query.findingId === "string" ? req.query.findingId : "")); } catch (error) { res.status(409).json({ ok: false, error: error instanceof Error ? error.message : "Graph context unavailable", databaseGroundingRequired: true }); } });
   app.post("/api/ai/ask", async (req, res) => {
     const question = String(req.body?.question ?? "");
     const audits = await listAudits();
-    const auditId = String(req.body?.auditId ?? (audits as any[])[0]?.id ?? "");
-    const portfolio = await getDomainPortfolio(auditId);
+    let auditId = String(req.body?.auditId ?? "");
+    let portfolio = auditId ? await getDomainPortfolio(auditId) : null;
+    if (!auditId || !(portfolio?.findings as any[])?.length) {
+      for (const candidate of audits as any[]) {
+        const candidatePortfolio = await getDomainPortfolio(candidate.id);
+        if ((candidatePortfolio.findings as any[])?.length) { auditId = candidate.id; portfolio = candidatePortfolio; break; }
+      }
+    }
+    portfolio = portfolio ?? await getDomainPortfolio(auditId);
     const findingId = String(req.body?.findingId ?? (portfolio.findings as any[])[0]?.id ?? "");
     if (req.body?.mode === "live") {
       try { return res.json(await answerLiveGroundedQuestion(question, auditId, findingId)); }
