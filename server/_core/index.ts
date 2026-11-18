@@ -33,6 +33,7 @@ import { getDomainPortfolio, getDomainStoreStatus, listAudits } from "../domain-
 import { getConfigurationStoreStatus, getControlledConfiguration, listControlledConfigurations, listControlledConfigurationPayloads } from "../config-store";
 import { getMergedStudioOpenApi, getStudioGatewayStatus, studioProxyMiddleware } from "../studio-gateway";
 import { resolveRequestPrincipal, AssuranceAccessError } from "../access-control";
+import { deleteUserConnector, getMuseSettings, getUserConnectorStatus, museReadiness, setMuseSettings, setUserConnector } from "../muse-settings";
 import { createPart21CaseRecord, getPart21Case, listPart21Cases, part21ClockBrief, part21ProcessReference, recordPart21Fact } from "../part21-case";
 import { listDomainRecords } from "../domain-store";
 import { verifyProcessCitations, verifyProcessModelCoverage } from "../part21-citation-verify";
@@ -299,13 +300,18 @@ async function startServer() {
         auditId: auditId || null,
         source: "mysql-database",
         regulatorySource: snapshot ? { ingested: true, snapshotId: snapshot.id, sourceAsOf: snapshot.sourceAsOf, latestAmendedOn: snapshot.latestAmendedOn, providerUpToDateAsOf: snapshot.providerUpToDateAsOf, provisions: snapshot.provisions.length, citationsVerified: verification?.verified ?? 0, citationsMismatched: verification?.mismatched ?? 0 } : { ingested: false, note: "No official source snapshot has been ingested; citations must not be presented as current law." },
-        temporal: { configured: Boolean(process.env.TEMPORAL_ADDRESS && process.env.TEMPORAL_NAMESPACE && process.env.TEMPORAL_TASK_QUEUE), running: false, note: "Durable workflows require a Temporal service and worker. Not configured in this deployment, so no production clock supervision is running." },
+        temporal: { installed: true, workflow: "Part21CaseWorkflow", timers: ["60 calendar days — evaluation and interim report", "30 days — written notification", "2 days — initial notification"], serviceConfigured: Boolean(process.env.TEMPORAL_ADDRESS && process.env.TEMPORAL_NAMESPACE && process.env.TEMPORAL_TASK_QUEUE), running: false, handoff: { ready: false, blockers: ["approved policy snapshot (approvalDecisionId)", "approved calendar snapshot (approvalDecisionId)", "discovery decision with evidence (discoveryDecisionId)"] }, note: "The workflow, deadline store and worker are installed and proven against a real Temporal server in tests. Production has no Temporal service, and no case can hand off until approved policy and calendar snapshots exist, so statutory clocks are currently computed on read rather than supervised by durable timers." },
         evidenceVault: { originalBytes: "mysql", objectLock: process.env.S3_OBJECT_LOCK_BUCKET ? "configured" : "not-configured", immudb: process.env.IMMUDB_ADDRESS ? "configured" : "not-configured", note: "A SHA-256 hash is not WORM protection. External Object Lock and immudb verification are not active." },
         part21Cases: { auditScoped: cases.length, clockModel: "event-triggered branches computed from recorded facts", calendarApproval: "not-approved-for-reliance" },
         humanReviewRequired: true,
       });
     } catch (error) { res.status(503).json({ ok: false, error: error instanceof Error ? error.message : "Nuclear status unavailable" }); }
   });
+  app.get("/api/settings/muse", async (req, res) => withPrincipal(req, res, async () => { const principal = await principalOrReadOnly(req, ""); return museReadiness(principal.id); }));
+  app.put("/api/settings/muse", async (req, res) => withPrincipal(req, res, async () => { const principal = await principalOrReadOnly(req, ""); if (!principal.isAdmin || principal.id === "read-only-visitor") throw new Error("Administrator identity is required to change Muse sharing."); return setMuseSettings(req.body ?? {}, principal.actor); }));
+  app.get("/api/me/muse", async (req, res) => withPrincipal(req, res, async () => { const principal = await principalOrReadOnly(req, ""); return getUserConnectorStatus(principal.id); }));
+  app.put("/api/me/muse", async (req, res) => withPrincipal(req, res, async () => { const principal = await principalOrReadOnly(req, ""); if (principal.id === "read-only-visitor") throw new Error("Sign in to connect your own Muse connector."); return setUserConnector(principal.id, req.body ?? {}); }));
+  app.delete("/api/me/muse", async (req, res) => withPrincipal(req, res, async () => { const principal = await principalOrReadOnly(req, ""); if (principal.id === "read-only-visitor") throw new Error("Sign in to remove a Muse connector."); return deleteUserConnector(principal.id); }));
   app.get("/api/nuclear/skills", async (_req, res) => {
     try {
       const active = (await listControlledConfigurationPayloads<any>("skill")).map(row => ({ kind: row.kind, configId: row.configId, version: row.version, status: row.status, approvedBy: row.approvedBy, approvedAt: row.approvedAt, payload: row.payload }));

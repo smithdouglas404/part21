@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { FileUp, RefreshCw } from "lucide-react";
 import { Configuration } from "./Controlled";
 import {
@@ -255,6 +255,7 @@ export function AdapterOperations({
             !connectorConfig.error && (
               <Empty>No active connector configuration.</Empty>
             )}
+        <MuseAccess isAdmin={isAdmin} />
         {isAdmin && (
           <div className="assurance-form">
             <label>
@@ -543,5 +544,91 @@ export function Admin({
       <AdapterOperations auditId={auditId} isAdmin />
       <WorkbookOperations auditId={auditId} />
     </div>
+  );
+}
+
+/**
+ * Muse access. Three independent states, all off by default:
+ * admin's own connector, app-wide sharing, and a person's own connector.
+ */
+export function MuseAccess({ isAdmin }: { isAdmin: boolean }) {
+  const [state, setState] = useState<any>(null);
+  const [error, setError] = useState("");
+  const [note, setNote] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [label, setLabel] = useState("");
+  const [baseUrl, setBaseUrl] = useState("");
+  const [token, setToken] = useState("");
+
+  const load = async () => {
+    try {
+      const response = await fetch("/api/settings/muse", { credentials: "include" });
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(body.error || `HTTP ${response.status}`);
+      setState(body);
+      setError("");
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Muse settings unavailable");
+    }
+  };
+  useEffect(() => { void load(); }, []);
+
+  const send = async (path: string, method: string, body?: unknown) => {
+    setBusy(true); setNote("");
+    try {
+      const response = await fetch(path, { method, credentials: "include", headers: { "content-type": "application/json" }, body: body ? JSON.stringify(body) : undefined });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(payload.error || `HTTP ${response.status}`);
+      setNote("Saved. Nothing is shared until you turn it on.");
+      setToken("");
+      await load();
+    } catch (cause) {
+      setNote(cause instanceof Error ? cause.message : "Save failed");
+    } finally { setBusy(false); }
+  };
+
+  const settings = state?.settings;
+  const effective = state?.effective;
+  return (
+    <Panel title="Muse access" subtitle="Off by default. Your connector is never used for another person unless you enable app-wide sharing.">
+      {error && <Empty>{error}</Empty>}
+      {settings && (
+        <div className="assurance-form">
+          <label>
+            <input type="checkbox" disabled={!isAdmin || busy} checked={Boolean(settings.adminSharedEnabled)} onChange={e => void send("/api/settings/muse", "PUT", { adminSharedEnabled: e.target.checked })} />
+            {" "}Use my Muse connector for my own sessions
+          </label>
+          <label>
+            <input type="checkbox" disabled={!isAdmin || busy} checked={Boolean(settings.appWideEnabled)} onChange={e => void send("/api/settings/muse", "PUT", { appWideEnabled: e.target.checked })} />
+            {" "}Let everyone use my connector app-wide
+          </label>
+          <p className="assurance-hint">
+            Effective for you: <strong>{effective?.source ?? "none"}</strong> — {effective?.reason}
+            {state?.adminConnectorConfigured === false && " Administrator connector token is not configured on the server."}
+            {state?.encryptionConfigured === false && " Personal connectors cannot be stored until PART21_SETTINGS_KEY is set."}
+          </p>
+          <label>
+            Your own connector label
+            <input value={label} onChange={e => setLabel(e.target.value)} placeholder="Optional label" />
+          </label>
+          <label>
+            Base URL
+            <input value={baseUrl} onChange={e => setBaseUrl(e.target.value)} placeholder="https://studio.example.com/api/v1" />
+          </label>
+          <label>
+            Bearer token
+            <input type="password" value={token} onChange={e => setToken(e.target.value)} placeholder="Stored encrypted; never returned" />
+          </label>
+          <div className="assurance-actions">
+            <button className="primary-button" disabled={busy || !baseUrl || !token} onClick={() => void send("/api/me/muse", "PUT", { label, baseUrl, token })}>Connect my Muse</button>
+            <button className="ghost-button" disabled={busy || !state?.you?.configured} onClick={() => void send("/api/me/muse", "DELETE")}>Remove mine</button>
+          </div>
+          <p className="assurance-hint">
+            Yours: {state?.you?.configured ? `${state.you.label} · ending ${state.you.last4}` : "not connected"}
+          </p>
+          {note && <p className="assurance-hint">{note}</p>}
+        </div>
+      )}
+    </Panel>
   );
 }
