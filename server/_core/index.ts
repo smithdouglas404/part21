@@ -30,7 +30,7 @@ import { callConnectedTool, createConnectToken, listConnectTokens, revokeConnect
 import { generateSyntheticPart21Decision, getDocumentControlStatus, listControlledDocuments, notarizeDocumentWithHederaDemo, registerControlledDocument, reviewDocumentCybersecurity } from "../document-control";
 import { getGroundedGraphContext, getGraphStoreStatus, validateGraphOntology } from "../graph-store";
 import { getDomainPortfolio, getDomainStoreStatus, listAudits } from "../domain-store";
-import { getConfigurationStoreStatus, getControlledConfiguration, listControlledConfigurations } from "../config-store";
+import { getConfigurationStoreStatus, getControlledConfiguration, listControlledConfigurations, listControlledConfigurationPayloads } from "../config-store";
 import { getMergedStudioOpenApi, getStudioGatewayStatus, studioProxyMiddleware } from "../studio-gateway";
 import { resolveRequestPrincipal, AssuranceAccessError } from "../access-control";
 import { createPart21CaseRecord, getPart21Case, listPart21Cases, part21ClockBrief, part21ProcessReference, recordPart21Fact } from "../part21-case";
@@ -305,6 +305,12 @@ async function startServer() {
         humanReviewRequired: true,
       });
     } catch (error) { res.status(503).json({ ok: false, error: error instanceof Error ? error.message : "Nuclear status unavailable" }); }
+  });
+  app.get("/api/nuclear/skills", async (_req, res) => {
+    try {
+      const active = (await listControlledConfigurationPayloads<any>("skill")).map(row => ({ kind: row.kind, configId: row.configId, version: row.version, status: row.status, approvedBy: row.approvedBy, approvedAt: row.approvedAt, payload: row.payload }));
+      res.json({ source: "mysql-database", scope: "10 CFR Part 21 with 10 CFR 50 Appendix B nuclear QA criteria", count: active.length, domains: { part21: active.filter(r => (r.payload as any)?.domain === "nuclear-part21").length, appendixB: active.filter(r => (r.payload as any)?.domain === "nuclear-appendix-b").length, method: active.filter(r => (r.payload as any)?.domain === "nuclear-qa-method").length }, skills: active });
+    } catch (error) { res.status(503).json({ ok: false, error: error instanceof Error ? error.message : "Skill library unavailable" }); }
   });
   app.get("/api/part21/agent-brief", async (req, res) => {
     try {
