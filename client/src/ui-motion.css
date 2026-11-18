@@ -1,0 +1,13 @@
+/* shadcn-compatible motion layer for the Part 21 control room */
+.ui-card { position: relative; overflow: hidden; border-color: #203249; background: linear-gradient(145deg, #101b2a, #0d1724); color: #e8f0f7; }
+.ui-card::after { content: ""; position: absolute; inset: 0; pointer-events: none; background: linear-gradient(110deg, transparent 20%, #ffffff08 48%, transparent 72%); transform: translateX(-120%); transition: transform .7s ease; }
+.ui-card:hover::after { transform: translateX(120%); }
+.metric-grid > .motion-safe\:animate-in { animation: none; }
+.metric-card { min-height: 155px; padding: 17px 18px; border-radius: 10px; cursor: pointer; }
+.metric-card-action:focus-visible { outline: 2px solid #52d6e6; outline-offset: 3px; }
+.motion-route-enter { animation: route-enter .3s cubic-bezier(.2,.7,.2,1) both; }
+@keyframes route-enter { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+@media (prefers-reduced-motion: reduce) { .ui-card::after { display: none; } .motion-route-enter { animation: none; } }
+
+.metric-progress { margin-top: 11px; height: 4px; background: #1b3044; }
+.metric-progress [data-slot="progress-indicator"] { background: linear-gradient(90deg, #3b9ca9, #63d8a0); }

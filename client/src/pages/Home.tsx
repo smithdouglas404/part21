@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { AnimatePresence, motion } from "framer-motion";
 import {
   Activity,
   ArrowDownRight,
@@ -84,6 +85,8 @@ import { applicationSkills, eccCatalog, embeddedEccModule } from "@shared/ecc";
 import { assurancePersonas, type AssurancePersona } from "@shared/personas";
 import { part21RegulatoryPack, regulatoryTraceForFinding } from "@shared/regulatory";
 import { part21PolicyPack } from "@shared/policy";
+import { Card } from "@/components/ui/card";
+import { Progress } from "@/components/ui/progress";
 
 const navItems: { id: ViewId; label: string; icon: typeof Activity; count?: string }[] = [
   { id: "overview", label: "Command center", icon: Gauge },
@@ -174,12 +177,15 @@ function AuditSwitchPanel({ activeAudit, auditList, onSelect }: { activeAudit: A
 
 function MetricCard({ label, value, delta, detail, icon: Icon, tone, trend = "up", onOpen }: { label: string; value: string | number; delta: string; detail: string; icon: typeof Activity; tone: RiskTone; trend?: "up" | "down"; onOpen: () => void }) {
   return (
-    <article className="metric-card metric-card-action" onClick={onOpen} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") onOpen(); }} role="button" tabIndex={0}>
+    <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} whileHover={{ y: -3 }} transition={{ duration: .28, ease: "easeOut" }}>
+    <Card className="metric-card metric-card-action" onClick={onOpen} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") onOpen(); }} role="button" tabIndex={0}>
       <div className="metric-top"><div className="metric-icon" style={{ color: toneColor[tone], background: `${toneColor[tone]}12` }}><Icon size={16} /></div><span className="metric-label">{label}</span><span className="metric-menu">···</span></div>
       <div className="metric-value-row"><strong>{value}</strong><span className={`metric-delta ${trend === "down" ? "delta-down" : ""}`}><ArrowUpRight size={13} />{delta}</span></div>
       <div className="metric-detail">{detail} <span className="metric-drill">Inspect calculation <ArrowUpRight size={11} /></span></div>
+      <Progress value={label === "Audit readiness" ? Number.parseInt(String(value), 10) : 68} className="metric-progress" aria-label={`${label} progress`} />
       <div className="metric-spark" aria-hidden="true"><span style={{ height: "38%" }} /><span style={{ height: "52%" }} /><span style={{ height: "45%" }} /><span style={{ height: "68%" }} /><span style={{ height: "58%" }} /><span style={{ height: "78%" }} /><span style={{ height: "92%", background: toneColor[tone] }} /></div>
-    </article>
+    </Card>
+    </motion.div>
   );
 }
 
