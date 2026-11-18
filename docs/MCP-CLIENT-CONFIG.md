@@ -1,4 +1,4 @@
-# Connecting Claude or another MCP client
+# Connecting Meta Muse, Muse Code, Claude, or another MCP client
 
 The Part 21 Assurance OS now exposes two MCP transports:
 
@@ -89,3 +89,8 @@ The platform ScheduleTask was not created in this sandbox because the project is
 ## Safety boundary
 
 Workbook reads and revision proposals are available to the MCP client. Graph mutation, report filing, notification, and final Part 21 interpretation remain human-gated. The system labels synthetic data, provider state, and connector status in responses so Claude cannot mistake the demonstration environment for a qualified client system.
+
+
+## Meta Muse
+
+For Meta Muse, use the deployed HTTPS endpoint as a Custom Connector. Follow [MUSE-INTEGRATION.md](./MUSE-INTEGRATION.md) for the exact Muse and Muse Code setup. The application-side MCP server is real; the user must still authorize the connector in their own Muse account.
