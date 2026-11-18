@@ -3,19 +3,21 @@ import { appendAssuranceEvent } from "./event-store";
 import { listDomainRecords, upsertDomainRecord } from "./domain-store";
 
 export type KanbanStatus = "backlog" | "in_progress" | "blocked" | "review" | "final";
-export type KanbanItem = { id: string; auditId: string; title: string; description: string; status: KanbanStatus; priority: "low" | "medium" | "high" | "critical"; attention: boolean; source: "field" | "agent" | "audit"; ownerPersonId?: string; findingId?: string; productId?: string; sourceRecordId?: string; observedAt?: string; createdBy: string; createdAt: string; updatedAt: string; attachmentIds: string[] };
+export type KanbanItem = { id: string; auditId: string; title: string; description: string; status: KanbanStatus; priority: "low" | "medium" | "high" | "critical"; attention: boolean; source: "field" | "agent" | "audit"; ownerPersonId?: string; findingId?: string; productId?: string; sourceRecordId?: string; conversationId?: string; skillIds?: string[]; activeSkillId?: string; observedAt?: string; createdBy: string; createdAt: string; updatedAt: string; attachmentIds: string[] };
 export type KanbanAttachment = { id: string; itemId: string; auditId: string; filename: string; mediaType: string; kind: "photo" | "document" | "voice"; sizeBytes: number; sha256: string; transcript?: string; createdBy: string; createdAt: string };
+export type KanbanCommunication = { id: string; itemId: string; auditId: string; conversationId: string; role: "user" | "agent" | "system"; actor: string; text: string; skillIds: string[]; createdAt: string };
 
 export async function listKanbanItems(auditId: string) {
   const items = await listDomainRecords<KanbanItem>("kanban_item", auditId);
   const attachments = await listDomainRecords<KanbanAttachment>("kanban_attachment", auditId);
-  return { source: "mysql-domain-records", auditId, items, attachments };
+  const communications = await listDomainRecords<KanbanCommunication>("kanban_communication", auditId);
+  return { source: "mysql-domain-records", auditId, items, attachments, communications };
 }
 
 export async function createKanbanItem(input: Partial<KanbanItem> & { auditId: string; createdBy: string }) {
   if (!input.auditId || !input.title) throw new Error("auditId and title are required.");
   const now = new Date().toISOString();
-  const item: KanbanItem = { id: input.id ?? `KB-${Date.now()}`, auditId: input.auditId, title: input.title, description: input.description ?? "", status: input.status ?? "backlog", priority: input.priority ?? "medium", attention: input.attention ?? true, source: input.source ?? "field", ownerPersonId: input.ownerPersonId, findingId: input.findingId, productId: input.productId, sourceRecordId: input.sourceRecordId, observedAt: input.observedAt, createdBy: input.createdBy, createdAt: now, updatedAt: now, attachmentIds: input.attachmentIds ?? [] };
+  const item: KanbanItem = { id: input.id ?? `KB-${Date.now()}`, auditId: input.auditId, title: input.title, description: input.description ?? "", status: input.status ?? "backlog", priority: input.priority ?? "medium", attention: input.attention ?? true, source: input.source ?? "field", ownerPersonId: input.ownerPersonId, findingId: input.findingId, productId: input.productId, sourceRecordId: input.sourceRecordId, conversationId: input.conversationId, skillIds: input.skillIds, activeSkillId: input.activeSkillId, observedAt: input.observedAt, createdBy: input.createdBy, createdAt: now, updatedAt: now, attachmentIds: input.attachmentIds ?? [] };
   await upsertDomainRecord({ recordType: "kanban_item", recordId: item.id, auditId: item.auditId, payload: item });
   const event = await appendAssuranceEvent({ type: "kanban_item_created", actor: item.createdBy, auditId: item.auditId, entityId: item.id, payload: { status: item.status, priority: item.priority, source: item.source } });
   return { ok: true, item, event, source: "mysql-domain-records" };
@@ -27,10 +29,17 @@ export async function moveKanbanItem(itemId: string, status: KanbanStatus, actor
   if (!item) throw new Error(`Kanban item ${itemId} was not found.`);
   if (!actor) throw new Error("actor is required.");
   const previousStatus = item.status;
-  const updated = { ...item, status, attention: status !== "final", updatedAt: new Date().toISOString() };
+  const updated = { ...item, status, activeSkillId: status === "in_progress" ? (item.activeSkillId ?? item.skillIds?.[0] ?? "finding-challenge") : item.activeSkillId, attention: status !== "final", updatedAt: new Date().toISOString() };
   await upsertDomainRecord({ recordType: "kanban_item", recordId: item.id, auditId: item.auditId, payload: updated });
   const event = await appendAssuranceEvent({ type: "kanban_item_moved", actor, auditId: item.auditId, entityId: item.id, payload: { from: previousStatus, to: status } });
   return { ok: true, item: updated, event, source: "mysql-domain-records" };
+}
+
+export async function appendKanbanCommunication(input: Omit<KanbanCommunication, "id" | "createdAt">) {
+  const communication: KanbanCommunication = { ...input, id: `KBC-${Date.now()}-${crypto.randomBytes(4).toString("hex")}`, createdAt: new Date().toISOString() };
+  await upsertDomainRecord({ recordType: "kanban_communication", recordId: communication.id, auditId: communication.auditId, payload: communication });
+  const event = await appendAssuranceEvent({ type: "kanban_communication_recorded", actor: communication.actor, auditId: communication.auditId, entityId: communication.itemId, payload: { communicationId: communication.id, conversationId: communication.conversationId, role: communication.role, skillIds: communication.skillIds } });
+  return { ok: true, communication, event, source: "mysql-domain-records" };
 }
 
 export async function attachKanbanAsset(input: { itemId: string; auditId: string; filename: string; mediaType: string; kind: KanbanAttachment["kind"]; base64?: string; transcript?: string; createdBy: string }) {

@@ -132,15 +132,21 @@ export async function callMcpTool(name: string, args: Record<string, unknown> = 
       const findings = portfolio.findings as any[];
       const findingsById = new Map(findings.map((finding) => [String(finding.id), finding]));
       const attachmentsById = new Map((kanban.attachments as any[]).map((attachment) => [String(attachment.id), attachment]));
+      const communicationsByItemId = new Map<string, any[]>();
+      for (const communication of kanban.communications as any[]) communicationsByItemId.set(String(communication.itemId), [...(communicationsByItemId.get(String(communication.itemId)) ?? []), communication]);
       const items = (kanban.items as any[]).map((item) => {
         const linkedFinding = item.findingId ? findingsById.get(String(item.findingId)) ?? null : null;
         const attachments = (item.attachmentIds ?? []).map((id: string) => attachmentsById.get(String(id))).filter(Boolean);
+        const communications = communicationsByItemId.get(String(item.id)) ?? [];
         const hasSpecificDescription = typeof item.description === "string" && item.description.trim().length >= 20;
         const traceabilityStatus = linkedFinding ? "confirmed_finding_link" : (item.productId || item.sourceRecordId ? "explicit_source_reference" : "unlinked_observation");
         return {
           ...item,
           linkedFinding,
           attachments,
+          communications,
+          communicationCount: communications.length,
+          appliedSkillIds: [...new Set([...((item.skillIds ?? []) as string[]), ...communications.flatMap((communication: any) => communication.skillIds ?? [])])],
           traceability: { status: traceabilityStatus, confirmed: Boolean(linkedFinding || item.productId || item.sourceRecordId), findingId: item.findingId ?? null, productId: item.productId ?? null, sourceRecordId: item.sourceRecordId ?? null },
           evidenceQuality: { descriptionSpecific: hasSpecificDescription, attachmentCount: attachments.length, status: hasSpecificDescription || attachments.length ? "reviewable" : "insufficient_detail" },
           factBoundary: linkedFinding ? "This finding link is stored on the Kanban record." : "No confirmed finding or source-record link is stored; do not infer one from title similarity."
@@ -156,6 +162,7 @@ export async function callMcpTool(name: string, args: Record<string, unknown> = 
           availableFindingIds: findings.map((finding) => finding.id),
           factBoundary: "Only explicit findingId, productId, sourceRecordId, descriptions, and attachment records are facts. Similar titles are hypotheses and are not returned as confirmed relationships."
         },
+        findingKanbanStatus: findings.map((finding) => ({ findingId: finding.id, title: finding.title, status: finding.status, severity: finding.severity, kanbanItems: items.filter((item: any) => item.findingId === finding.id).map((item: any) => ({ id: item.id, status: item.status, priority: item.priority, attention: item.attention })) })),
         source: "mysql-domain-records-plus-audit-portfolio"
       };
     }
@@ -166,7 +173,7 @@ export async function callMcpTool(name: string, args: Record<string, unknown> = 
     case "field_kanban_create":
       return createKanbanItem({ auditId: String(args.auditId ?? ""), title: String(args.title ?? ""), description: String(args.description ?? ""), status: (args.status as any) ?? "backlog", priority: (args.priority as any) ?? "medium", attention: true, source: "field", ownerPersonId: args.ownerPersonId ? String(args.ownerPersonId) : undefined, findingId: args.findingId ? String(args.findingId) : undefined, productId: args.productId ? String(args.productId) : undefined, sourceRecordId: args.sourceRecordId ? String(args.sourceRecordId) : undefined, observedAt: args.observedAt ? String(args.observedAt) : undefined, createdBy: String(args.createdBy ?? "Muse field operator") });
     case "field_kanban_move":
-      return moveKanbanItem(String(args.itemId ?? ""), String(args.status ?? "backlog") as any, String(args.actor ?? "Muse field operator"));
+      return moveKanbanItem(String(args.itemId ?? ""), (String(args.status ?? "backlog").toLowerCase() === "active" ? "in_progress" : String(args.status ?? "backlog").toLowerCase()) as any, String(args.actor ?? "Muse field operator"));
     case "field_kanban_attach":
       return attachKanbanAsset({ itemId: String(args.itemId ?? ""), auditId: String(args.auditId ?? ""), filename: String(args.filename ?? "field-attachment"), mediaType: String(args.mediaType ?? "application/octet-stream"), kind: (args.kind as any) ?? "document", base64: args.base64 ? String(args.base64) : undefined, transcript: args.transcript ? String(args.transcript) : undefined, createdBy: String(args.createdBy ?? "Muse field operator") });
     default:
