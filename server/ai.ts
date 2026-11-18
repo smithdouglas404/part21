@@ -3,13 +3,14 @@ import { getFindingOntologyContext, getTemporalHistory } from "../shared/ontolog
 import { graphNodes } from "../shared/demo";
 import { applicationSkills } from "../shared/ecc";
 import { auditSkills } from "../shared/skills";
+import { invokeLLM } from "./_core/llm";
 
 const sandboxEnvironmentProvider: "openai" | "anthropic" | null = process.env.OPENAI_API_KEY ? "openai" : process.env.ANTHROPIC_API_KEY ? "anthropic" : null;
 let configuredProvider: "openai" | "anthropic" | null = null;
 let configuredAt: string | null = null;
 
 export function getAiStatus() {
-  return { mode: configuredProvider ? "provider-configured" : "demo-grounded", provider: configuredProvider, keyStored: Boolean(configuredProvider), sandboxEnvironmentProvider, keyStorage: "runtime environment / secret manager contract", usedFor: ["graph questions", "finding insights", "remediation recommendations", "report drafting"], note: configuredProvider ? "Provider status was explicitly configured in the admin panel. This demo still uses deterministic grounded answers until an LLM execution adapter is enabled." : sandboxEnvironmentProvider ? "A sandbox runtime key is present but is not used by this demo. No client LLM key is configured. Current advice is deterministic and grounded in the synthetic graph, ontology, temporal events, and Part 21 source pack." : "No client LLM key is configured. Current advice is deterministic and grounded in the synthetic graph, ontology, temporal events, and Part 21 source pack.", configuredAt };
+  return { mode: configuredProvider ? "provider-configured" : "demo-grounded", provider: configuredProvider, keyStored: Boolean(configuredProvider), liveDemoAvailable: true, liveDemoModel: "managed runtime · requested claude-haiku-4-5 · actual response model shown in trace", sandboxEnvironmentProvider, keyStorage: "runtime environment / secret manager contract", usedFor: ["graph questions", "finding insights", "remediation recommendations", "report drafting"], note: configuredProvider ? "Provider status was explicitly configured in the admin panel. Live demo mode uses the managed LLM runtime only when explicitly requested." : "Grounded demo mode is deterministic by default. Live demo mode can invoke the managed LLM runtime with a Part 21 context packet; no client production provider is implied.", configuredAt };
 }
 
 export function configureAiProvider(provider: "openai" | "anthropic", key: string) {
@@ -33,4 +34,30 @@ export function answerGroundedQuestion(question: string) {
   else if (normalized.includes("who") || normalized.includes("involved")) { appliedSkill = "frame-scope"; followUpQuestions = ["Which accountable role should own the next action?", "Which delegated roles must acknowledge the audit?", "Should I open the scope framing skill?"]; answer = `The graph context includes ${graphNodes.filter((node) => node.type === "person").map((person) => person.label).join(", ")}. Each relationship is synthetic until confirmed against the people directory and audit decision ledger.`; }
   const skill = [...auditSkills, ...applicationSkills].find((candidate) => candidate.id === appliedSkill) ?? [...auditSkills, ...applicationSkills].find((candidate) => candidate.id === "finding-challenge") ?? auditSkills[0];
   return { question, answer, appliedSkill, skillInvocation: { skillId: skill.id, name: skill.name, route: skill.route, contract: skill.skillContract, humanGate: skill.humanGate, invokedAt: new Date().toISOString(), invocationMode: "deterministic local router · provider not invoked" }, followUpQuestions, grounding: { findingId: "FIND-2026-04", graphEntities: graphNodes.length, temporalEvents: history.length, regulatoryPath: regulatoryTraceForFinding.path, sourceIds: ["FIND-2026-04", "AUD-026", "EV-803", "CHG-014"] }, provider: configuredProvider ? `${configuredProvider} configured · deterministic fallback · LLM not invoked` : "demo-grounded · no LLM invoked", humanReviewRequired: true };
+}
+
+export async function answerLiveGroundedQuestion(question: string) {
+  const grounded = answerGroundedQuestion(question);
+  const contextPacket = {
+    activeAudit: "AUD-026",
+    pertNode: "guided audit phase selected by the employee",
+    appliedSkill: grounded.skillInvocation,
+    graphEntities: grounded.grounding.graphEntities,
+    temporalEvents: grounded.grounding.temporalEvents,
+    regulatoryPath: grounded.grounding.regulatoryPath,
+    sourceIds: grounded.grounding.sourceIds,
+    deterministicGroundingHint: grounded.answer,
+    humanReviewRequired: true
+  };
+  const response = await invokeLLM({
+    model: "claude-haiku-4-5",
+    maxTokens: 900,
+    messages: [
+      { role: "system", content: "You are the interactive compliance agent inside a nuclear Part 21 audit application. Use only the supplied grounded context. Give a concise recommendation, name one overlooked consideration, and ask exactly two useful follow-up questions. Never make a final legal, reportability, NRC notification, or compliance verdict. State when qualified human review is required. Return plain text with headings: Recommendation, Overlooked consideration, Follow-up questions." },
+      { role: "user", content: `Employee question or answer:\n${question}\n\nGrounded Part 21 context packet:\n${JSON.stringify(contextPacket, null, 2)}` }
+    ]
+  });
+  const content = typeof response.choices?.[0]?.message?.content === "string" ? response.choices[0].message.content : grounded.answer;
+  const followUps = content.split("\n").map((line) => line.replace(/^[-*\d.)\s]+/, "").trim()).filter((line) => line.length > 20 && (line.includes("?") || line.toLowerCase().startsWith("follow-up"))).slice(0, 2);
+  return { ...grounded, answer: content, followUpQuestions: followUps.length ? followUps : grounded.followUpQuestions.slice(0, 2), provider: "managed live demo LLM", model: response.model || "claude-haiku-4-5", llmInvoked: true, groundedContextPacket: contextPacket, usage: response.usage, invocationMode: "live grounded model invocation", humanReviewRequired: true };
 }

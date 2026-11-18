@@ -10,7 +10,7 @@ import { buildAuditReadinessReport, exportBitemporalGraph, getAgentActivity, get
 import { ontologyStorageStatus, syncOntologySnapshot } from "../ontology-store";
 import { getReportDraft, registerEvidence } from "../evidence";
 import { assessRemediationImpact, part21RegulatoryPack, traverseRegulatoryTree } from "../../shared/regulatory";
-import { answerGroundedQuestion, configureAiProvider, getAiStatus } from "../ai";
+import { answerGroundedQuestion, answerLiveGroundedQuestion, configureAiProvider, getAiStatus } from "../ai";
 import { getEccCatalog, getEmbeddedEccModule } from "../../shared/ecc";
 import { decideGovernanceItem, getGovernanceBoard, moveGovernanceItem } from "../../shared/governance";
 import { controlAgent, getAgentRegistry } from "../agent-runtime";
@@ -89,7 +89,14 @@ async function startServer() {
   app.get("/api/regulatory/trace", (req, res) => res.json(traverseRegulatoryTree(typeof req.query.findingId === "string" ? req.query.findingId : undefined)));
   app.get("/api/regulatory/impact", (req, res) => res.json(assessRemediationImpact(typeof req.query.findingId === "string" ? req.query.findingId : undefined)));
   app.get("/api/ai/status", (_req, res) => res.json(getAiStatus()));
-  app.post("/api/ai/ask", (req, res) => res.json(answerGroundedQuestion(String(req.body?.question ?? ""))));
+  app.post("/api/ai/ask", async (req, res) => {
+    const question = String(req.body?.question ?? "");
+    if (req.body?.mode === "live") {
+      try { return res.json(await answerLiveGroundedQuestion(question)); }
+      catch (error) { return res.status(502).json({ ...answerGroundedQuestion(question), llmInvoked: false, liveError: error instanceof Error ? error.message : "Live LLM invocation failed" }); }
+    }
+    return res.json(answerGroundedQuestion(question));
+  });
   app.post("/api/ai/config", (req, res) => res.json(configureAiProvider(req.body?.provider === "anthropic" ? "anthropic" : "openai", String(req.body?.key ?? ""))));
   app.get("/api/ecc/catalog", (_req, res) => res.json(getEccCatalog()));
   app.get("/api/ecc/module", (_req, res) => res.json(getEmbeddedEccModule()));
