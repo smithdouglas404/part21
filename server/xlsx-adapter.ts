@@ -116,6 +116,12 @@ export function approveWorkbookImport(workbookId: string, actor: string, note = 
   return { ok: true, status: "approved_and_persisted", event, graphProjectionCount: graphProjection.length, warning: "The durable workbook overlay is persisted. Client-qualified ontology mapping is still required before promoting rows into authoritative system-of-record entities." };
 }
 
+export function listPendingWorkbookApprovals() {
+  const imported = listAssuranceEvents({ type: "excel.workbook_imported" });
+  const approved = new Set(listAssuranceEvents({ type: "excel.graph_import_approved" }).map((event) => event.entityId));
+  return imported.filter((event) => !approved.has(event.entityId)).map((event) => ({ workbookId: event.entityId, importedAt: event.occurredAt, actor: event.actor, snapshot: event.payload.snapshot, diff: event.payload.diff, approvalStatus: "pending_human_review" }));
+}
+
 export function compareSnapshots(previous: WorkbookSnapshot | null, current: WorkbookSnapshot | null = lastSnapshot) {
   if (!current) return { status: "no_snapshot", changed: [], addedSheets: [], removedSheets: [] };
   if (!previous) return { status: "baseline_created", changed: current.sheets.flatMap((sheet) => sheet.sample.map((row) => ({ sheet: sheet.name, change: "baseline row", row }))), addedSheets: current.sheets.map((sheet) => sheet.name), removedSheets: [] };

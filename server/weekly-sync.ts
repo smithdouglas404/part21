@@ -1,6 +1,7 @@
 import { getPolicyCoverage } from "../shared/policy";
 import { syncLocalWorkbooks } from "./xlsx-adapter";
 import { buildAuditReadinessReport } from "./agentkit";
+import { getReportDraft } from "./evidence";
 import { appendAssuranceEvent } from "./event-store";
 
 const connectorRegistry = [
@@ -22,6 +23,7 @@ export function runWeeklySourceSync(actor = "Weekly Part 21 scheduler") {
     connectedSources: connectorRegistry.filter((connector) => connector.status === "connected"),
     pendingConnectorSetup: connectorRegistry.filter((connector) => connector.status !== "connected"),
     complianceChecks: { auditReadiness: readiness, policyCoverage, supplierRisk: { status: "review_required", recommendation: "Run supplier risk once the ERP/Salesforce connector is configured; do not infer supplier state from an unconnected source." } },
+    generatedReportDraft: getReportDraft("FIND-2026-04"),
     humanGates: ["Review changed workbook revisions", "Approve any graph-overlay promotion", "Validate Part 21 applicability and interpretation with qualified SMEs", "Do not file or notify automatically"],
   };
   const event = appendAssuranceEvent({ type: "weekly.compliance_sync_completed", actor, auditId: "AUD-026", payload: report });

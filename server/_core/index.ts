@@ -17,7 +17,7 @@ import { controlAgent, getAgentRegistry } from "../agent-runtime";
 import { getVendoredEccLibrary } from "../ecc-library";
 import { renderEmbeddedEccDashboard } from "../ecc-dashboard";
 import { buildPolicyGraph, compileDocumentToPolicy, evaluatePart21Policy, getPolicyCoverage, part21PolicyPack } from "../../shared/policy";
-import { compareSnapshots, getExcelAdapterStatus, importWorkbookPayload, listSampleWorkbooks, readWorkbookSample } from "../xlsx-adapter";
+import { approveWorkbookImport, compareSnapshots, getExcelAdapterStatus, importWorkbookPayload, listPendingWorkbookApprovals, listSampleWorkbooks, readWorkbookSample } from "../xlsx-adapter";
 import { handleMcpJsonRpc } from "../mcp-protocol";
 import { getEventStoreStatus, listAssuranceEvents } from "../event-store";
 import { runWeeklySourceSync } from "../weekly-sync";
@@ -52,6 +52,8 @@ async function startServer() {
   app.get("/api/events/status", (_req, res) => res.json(getEventStoreStatus()));
   app.get("/api/events", (req, res) => res.json(listAssuranceEvents({ type: typeof req.query.type === "string" ? req.query.type : undefined, entityId: typeof req.query.entityId === "string" ? req.query.entityId : undefined, auditId: typeof req.query.auditId === "string" ? req.query.auditId : undefined })));
   app.post("/api/sync/weekly", (req, res) => res.json(runWeeklySourceSync(String(req.body?.actor ?? "Application weekly scheduler"))));
+  app.get("/api/approvals/pending", (_req, res) => res.json({ approvalStatus: "pending_human_review", items: listPendingWorkbookApprovals(), humanGate: "Qualified reviewer must inspect source provenance and revision diff before approval." }));
+  app.post("/api/approvals/workbooks/:workbookId", (req, res) => res.json(approveWorkbookImport(req.params.workbookId, String(req.body?.actor ?? "Quality approver"), String(req.body?.note ?? "Approved after human review"))));
   app.get("/api/admin/excel/status", (_req, res) => res.json(getExcelAdapterStatus()));
   app.get("/api/admin/excel/samples", (_req, res) => res.json(listSampleWorkbooks()));
   app.get("/api/admin/excel/last", (_req, res) => res.json(readWorkbookSample()));
