@@ -10,7 +10,7 @@ import { buildAuditReadinessReport, exportBitemporalGraph, getAgentActivity, get
 import { ontologyStorageStatus, syncOntologySnapshot } from "../ontology-store";
 import { getReportDraft, registerEvidence } from "../evidence";
 import { assessRemediationImpact, part21RegulatoryPack, traverseRegulatoryTree } from "../../shared/regulatory";
-import { answerGroundedQuestion, answerLiveGroundedQuestion, configureAiProvider, getAiStatus } from "../ai";
+import { acknowledgeComplianceWarning, answerGroundedQuestion, answerLiveGroundedQuestion, configureAiProvider, getAiStatus } from "../ai";
 import { getEccCatalog, getEmbeddedEccModule } from "../../shared/ecc";
 import { decideGovernanceItem, getGovernanceBoard, moveGovernanceItem } from "../../shared/governance";
 import { controlAgent, getAgentRegistry } from "../agent-runtime";
@@ -101,6 +101,7 @@ async function startServer() {
     }
     return res.json(answerGroundedQuestion(question));
   });
+  app.post("/api/ai/warnings/:warningId/acknowledge", (req, res) => res.json(acknowledgeComplianceWarning({ warningId: req.params.warningId, traceId: String(req.body?.traceId ?? ""), actor: String(req.body?.actor ?? ""), rationale: String(req.body?.rationale ?? "") })));
   app.post("/api/ai/config", (req, res) => res.json(configureAiProvider(req.body?.provider === "anthropic" ? "anthropic" : "openai", String(req.body?.key ?? ""))));
   app.get("/api/ecc/catalog", (_req, res) => res.json(getEccCatalog()));
   app.get("/api/ecc/module", (_req, res) => res.json(getEmbeddedEccModule()));

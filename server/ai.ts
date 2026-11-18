@@ -5,6 +5,7 @@ import { applicationSkills } from "../shared/ecc";
 import { auditSkills } from "../shared/skills";
 import { invokeLLM } from "./_core/llm";
 import { getGroundedGraphContext } from "./graph-store";
+import { appendAssuranceEvent } from "./event-store";
 
 const sandboxEnvironmentProvider: "openai" | "anthropic" | null = process.env.OPENAI_API_KEY ? "openai" : process.env.ANTHROPIC_API_KEY ? "anthropic" : null;
 let configuredProvider: "openai" | "anthropic" | null = null;
@@ -64,5 +65,14 @@ export async function answerLiveGroundedQuestion(question: string) {
   });
   const content = typeof response.choices?.[0]?.message?.content === "string" ? response.choices[0].message.content : grounded.answer;
   const followUps = content.split("\n").map((line) => line.replace(/^[-*\d.)\s]+/, "").trim()).filter((line) => line.length > 20 && (line.includes("?") || line.toLowerCase().startsWith("follow-up"))).slice(0, 2);
-  return { ...grounded, answer: content, followUpQuestions: followUps.length ? followUps : grounded.followUpQuestions.slice(0, 2), provider: "managed live demo LLM", model: response.model || "claude-haiku-4-5", llmInvoked: true, groundedContextPacket: contextPacket, usage: response.usage, invocationMode: "live grounded model invocation", humanReviewRequired: true };
+  const traceId = `TRACE-${Date.now()}`;
+  const warning = { id: `WARN-${Date.now()}`, traceId, code: "PART21-REPORTABILITY-REVIEW", severity: "high", title: "Potential Part 21 reportability concern", detail: "The grounded graph contains an unresolved traceability condition involving a finding, supplier evidence, and a material change. Do not issue a final reportability or notification conclusion without qualified human review.", basis: ["21.21", "21.51", "21.61", "F-042", "EV-771", "CHG-014"], acknowledgmentRequired: true };
+  appendAssuranceEvent({ type: "compliance_warning_issued", actor: "Compliance Agent", auditId: "AUD-026", entityId: warning.id, payload: { warning, question, model: response.model || "managed-runtime", graphSource: graphContext.source, graphCounts: { nodes: graphContext.nodes.length, edges: graphContext.edges.length, temporalEvents: graphContext.temporalEvents.length }, evidence: contextPacket.sourceIds } });
+  return { ...grounded, answer: content, followUpQuestions: followUps.length ? followUps : grounded.followUpQuestions.slice(0, 2), provider: "managed live demo LLM", model: response.model || "claude-haiku-4-5", llmInvoked: true, groundedContextPacket: contextPacket, usage: response.usage, invocationMode: "live grounded model invocation", humanReviewRequired: true, traceId, warning };
+}
+
+export function acknowledgeComplianceWarning(input: { warningId: string; traceId?: string; actor: string; rationale: string }) {
+  if (!input.warningId || !input.actor || !input.rationale) return { ok: false, error: "warningId, actor, and rationale are required" };
+  const event = appendAssuranceEvent({ type: "compliance_warning_acknowledged", actor: input.actor, auditId: "AUD-026", entityId: input.warningId, payload: { warningId: input.warningId, traceId: input.traceId, rationale: input.rationale, decision: "Acknowledged for qualified human review; not a reportability determination" } });
+  return { ok: true, event, message: "Warning acknowledgment persisted to the append-only assurance event ledger." };
 }
