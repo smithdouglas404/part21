@@ -33,6 +33,7 @@ import { getDomainPortfolio, getDomainStoreStatus, listAudits } from "../domain-
 import { getConfigurationStoreStatus, getControlledConfiguration, listControlledConfigurations, listControlledConfigurationPayloads } from "../config-store";
 import { getMergedStudioOpenApi, getStudioGatewayStatus, studioProxyMiddleware } from "../studio-gateway";
 import { resolveRequestPrincipal, AssuranceAccessError } from "../access-control";
+import { supervisePart21Case, supervisionStatus, temporalIsConfigured } from "../part21-supervision";
 import { deleteUserConnector, getMuseSettings, getUserConnectorStatus, museReadiness, setMuseSettings, setUserConnector } from "../muse-settings";
 import { createPart21CaseRecord, getPart21Case, listPart21Cases, part21ClockBrief, part21ProcessReference, recordPart21Fact } from "../part21-case";
 import { listDomainRecords } from "../domain-store";
@@ -326,6 +327,7 @@ async function startServer() {
   app.get("/api/me/muse", async (req, res) => withPrincipal(req, res, async () => { const principal = await principalOrReadOnly(req, ""); return getUserConnectorStatus(principal.id); }));
   app.put("/api/me/muse", async (req, res) => withPrincipal(req, res, async () => { const principal = await principalOrReadOnly(req, ""); if (principal.id === "read-only-visitor") throw new Error("Sign in to connect your own Muse connector."); return setUserConnector(principal.id, req.body ?? {}); }));
   app.delete("/api/me/muse", async (req, res) => withPrincipal(req, res, async () => { const principal = await principalOrReadOnly(req, ""); if (principal.id === "read-only-visitor") throw new Error("Sign in to remove a Muse connector."); return deleteUserConnector(principal.id); }));
+  app.get("/api/part21/cases/:caseId/supervision", async (req, res) => withPrincipal(req, res, async () => supervisionStatus(req.params.caseId)));
   app.get("/api/nuclear/skills", async (_req, res) => {
     try {
       const active = (await listControlledConfigurationPayloads<any>("skill")).map(row => ({ kind: row.kind, configId: row.configId, version: row.version, status: row.status, approvedBy: row.approvedBy, approvedAt: row.approvedAt, payload: row.payload }));
@@ -340,7 +342,13 @@ async function startServer() {
   });
   app.get("/api/part21/process", async (req, res) => res.json(await part21ProcessReference(calendarFrom(req))));
   app.get("/api/part21/cases", async (req, res) => withPrincipal(req, res, async () => { const auditId = String(req.query.auditId ?? ""); const principal = await principalOrReadOnly(req, auditId); return listPart21Cases(auditId, principal); }));
-  app.get("/api/part21/cases/:caseId", async (req, res) => withPrincipal(req, res, async () => { const auditId = String(req.query.auditId ?? ""); const principal = await principalOrReadOnly(req, auditId); return getPart21Case(auditId, req.params.caseId, principal, calendarFrom(req)); }));
+  app.get("/api/part21/cases/:caseId", async (req, res) => withPrincipal(req, res, async () => { const auditId = String(req.query.auditId ?? ""); const principal = await principalOrReadOnly(req, auditId); const view = await getPart21Case(auditId, req.params.caseId, principal, calendarFrom(req));
+      let supervision: any = null;
+      if (process.env.PART21_AUTO_SUPERVISE === "true" && await temporalIsConfigured()) {
+        try { supervision = await supervisePart21Case(view as any, principal.actor, "Part 21 baseline recorded at supervision: Mon-Fri working calendar with US federal holidays, 60/30/2-day statutory durations."); }
+        catch (error) { supervision = { bound: false, error: error instanceof Error ? error.message : "Supervision unavailable" }; }
+      }
+      return { ...view, supervision }; }));
   app.post("/api/part21/cases", async (req, res) => withPrincipal(req, res, async getPrincipal => createPart21CaseRecord(req.body ?? {}, await getPrincipal())));
   app.post("/api/part21/cases/:caseId/facts", async (req, res) => withPrincipal(req, res, async getPrincipal => recordPart21Fact({ ...(req.body ?? {}), auditId: String(req.body?.auditId ?? req.query.auditId ?? ""), caseId: req.params.caseId }, await getPrincipal())));
   app.get("/api/regulatory/snapshots", async (_req, res) => {

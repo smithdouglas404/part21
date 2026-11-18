@@ -29,5 +29,6 @@ ENV TEMPORAL_HEALTH_STALE_MS=1000
 ENV TEMPORAL_WORKFLOW_BUNDLE_PATH=/app/dist/temporal/workflow-bundle.js
 ENV TEMPORAL_WORKER_ENTRY=/app/dist/temporal/worker-entry.js
 ENV TEMPORAL_APPLY_MIGRATION=true
+ENV PART21_AUTO_SUPERVISE=true
 EXPOSE 3000
 CMD ["bash", "scripts/start-stack.sh"]
