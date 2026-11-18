@@ -23,6 +23,7 @@ import { getEventStoreStatus, listAssuranceEvents } from "../event-store";
 import { runWeeklySourceSync } from "../weekly-sync";
 import { generateSyntheticPart21Decision, getDocumentControlStatus, listControlledDocuments, notarizeDocumentWithHederaDemo, registerControlledDocument, reviewDocumentCybersecurity } from "../document-control";
 import { getGroundedGraphContext, graphStoreStatus, syncGraphSeed } from "../graph-store";
+import { getDomainPortfolio, getDomainStoreStatus, listAudits } from "../domain-store";
 import { createContext } from "./context";
 import { serveStatic, setupVite } from "./vite";
 
@@ -33,6 +34,9 @@ async function startServer() {
   app.use(express.json({ limit: "50mb" }));
   app.use(express.urlencoded({ limit: "50mb", extended: true }));
   app.get("/api/health", (_req, res) => res.json({ status: "ok" }));
+  app.get("/api/domain/status", async (_req, res) => res.json(await getDomainStoreStatus()));
+  app.get("/api/domain/audits", async (_req, res) => res.json({ source: "mysql-database", audits: await listAudits() }));
+  app.get("/api/domain/portfolio", async (req, res) => res.json(await getDomainPortfolio(typeof req.query.auditId === "string" ? req.query.auditId : "AUD-026")));
   app.get("/api/platform/config.js", (_req, res) => {
     res.set("Cache-Control", "no-store").type("application/javascript").send(publicPlatformScript());
   });
@@ -53,15 +57,15 @@ async function startServer() {
   });
   app.get("/api/events/status", (_req, res) => res.json(getEventStoreStatus()));
   app.get("/api/events", (req, res) => res.json(listAssuranceEvents({ type: typeof req.query.type === "string" ? req.query.type : undefined, entityId: typeof req.query.entityId === "string" ? req.query.entityId : undefined, auditId: typeof req.query.auditId === "string" ? req.query.auditId : undefined })));
-  app.post("/api/sync/weekly", (req, res) => res.json(runWeeklySourceSync(String(req.body?.actor ?? "Application weekly scheduler"))));
+  app.post("/api/sync/weekly", async (req, res) => res.json(await runWeeklySourceSync(String(req.body?.actor ?? "Application weekly scheduler"))));
   app.get("/api/approvals/pending", (_req, res) => res.json({ approvalStatus: "pending_human_review", items: listPendingWorkbookApprovals(), humanGate: "Qualified reviewer must inspect source provenance and revision diff before approval." }));
   app.post("/api/approvals/workbooks/:workbookId", (req, res) => res.json(approveWorkbookImport(req.params.workbookId, String(req.body?.actor ?? "Quality approver"), String(req.body?.note ?? "Approved after human review"))));
-  app.get("/api/document-control/status", (_req, res) => res.json(getDocumentControlStatus()));
-  app.get("/api/documents", (req, res) => res.json({ documents: listControlledDocuments({ auditId: typeof req.query.auditId === "string" ? req.query.auditId : undefined }) }));
-  app.post("/api/documents", (req, res) => res.json(registerControlledDocument(req.body ?? {})));
-  app.post("/api/documents/:documentId/cybersecurity-review", (req, res) => res.json(reviewDocumentCybersecurity(req.params.documentId, req.body ?? {})));
-  app.post("/api/documents/:documentId/notarize", (req, res) => res.json(notarizeDocumentWithHederaDemo(req.params.documentId, String(req.body?.actor ?? "Quality approver"))));
-  app.post("/api/documents/:documentId/part21-decision", (req, res) => res.json(generateSyntheticPart21Decision(req.params.documentId, String(req.body?.actor ?? "Part 21 review agent"))));
+  app.get("/api/document-control/status", async (_req, res) => res.json(await getDocumentControlStatus()));
+  app.get("/api/documents", async (req, res) => res.json({ documents: await listControlledDocuments({ auditId: typeof req.query.auditId === "string" ? req.query.auditId : undefined }) }));
+  app.post("/api/documents", async (req, res) => res.json(await registerControlledDocument(req.body ?? {})));
+  app.post("/api/documents/:documentId/cybersecurity-review", async (req, res) => res.json(await reviewDocumentCybersecurity(req.params.documentId, req.body ?? {})));
+  app.post("/api/documents/:documentId/notarize", async (req, res) => res.json(await notarizeDocumentWithHederaDemo(req.params.documentId, String(req.body?.actor ?? "Quality approver"))));
+  app.post("/api/documents/:documentId/part21-decision", async (req, res) => res.json(await generateSyntheticPart21Decision(req.params.documentId, String(req.body?.actor ?? "Part 21 review agent"))));
   app.get("/api/admin/excel/status", (_req, res) => res.json(getExcelAdapterStatus()));
   app.get("/api/admin/excel/samples", (_req, res) => res.json(listSampleWorkbooks()));
   app.get("/api/admin/excel/last", (_req, res) => res.json(readWorkbookSample()));
@@ -84,8 +88,8 @@ async function startServer() {
   app.get("/api/agentkit/activity", (req, res) => res.json({ agents: getAgentActivity(typeof req.query.agentId === "string" ? req.query.agentId : undefined) }));
   app.get("/api/agentkit/manifest.json", (_req, res) => res.json(getAgentKitManifest()));
   app.get("/api/graph/export", (req, res) => res.json(exportBitemporalGraph(typeof req.query.findingId === "string" ? req.query.findingId : undefined)));
-  app.post("/api/evidence/intake", (req, res) => res.json(registerEvidence(req.body ?? {})));
-  app.get("/api/reports/draft", (req, res) => res.json(getReportDraft(typeof req.query.findingId === "string" ? req.query.findingId : undefined)));
+  app.post("/api/evidence/intake", async (req, res) => res.json(await registerEvidence(req.body ?? {})));
+  app.get("/api/reports/draft", async (req, res) => res.json(await getReportDraft(typeof req.query.findingId === "string" ? req.query.findingId : undefined)));
   app.get("/api/regulatory/pack", (_req, res) => res.json(part21RegulatoryPack));
   app.get("/api/regulatory/trace", (req, res) => res.json(traverseRegulatoryTree(typeof req.query.findingId === "string" ? req.query.findingId : undefined)));
   app.get("/api/regulatory/impact", (req, res) => res.json(assessRemediationImpact(typeof req.query.findingId === "string" ? req.query.findingId : undefined)));
@@ -97,9 +101,9 @@ async function startServer() {
     const question = String(req.body?.question ?? "");
     if (req.body?.mode === "live") {
       try { return res.json(await answerLiveGroundedQuestion(question)); }
-      catch (error) { return res.status(502).json({ ...answerGroundedQuestion(question), llmInvoked: false, liveError: error instanceof Error ? error.message : "Live LLM invocation failed" }); }
+      catch (error) { return res.status(502).json({ ok: false, error: error instanceof Error ? error.message : "Live grounded LLM invocation failed", databaseGroundingRequired: true }); }
     }
-    return res.json(answerGroundedQuestion(question));
+    return res.json(await answerGroundedQuestion(question));
   });
   app.post("/api/ai/warnings/:warningId/acknowledge", (req, res) => res.json(acknowledgeComplianceWarning({ warningId: req.params.warningId, traceId: String(req.body?.traceId ?? ""), actor: String(req.body?.actor ?? ""), rationale: String(req.body?.rationale ?? "") })));
   app.post("/api/ai/config", (req, res) => res.json(configureAiProvider(req.body?.provider === "anthropic" ? "anthropic" : "openai", String(req.body?.key ?? ""))));
@@ -125,11 +129,11 @@ async function startServer() {
   app.post("/api/ontology/sync", async (_req, res) => {
     res.json(await syncOntologySnapshot());
   });
-  app.get("/api/reports/audit-readiness", (req, res) => {
-    res.json(buildAuditReadinessReport(typeof req.query.auditId === "string" ? req.query.auditId : "AUD-026"));
+  app.get("/api/reports/audit-readiness", async (req, res) => {
+    res.json(await buildAuditReadinessReport(typeof req.query.auditId === "string" ? req.query.auditId : "AUD-026"));
   });
-  app.get("/api/reports/audit-readiness.csv", (req, res) => {
-    const report = buildAuditReadinessReport(typeof req.query.auditId === "string" ? req.query.auditId : "AUD-026");
+  app.get("/api/reports/audit-readiness.csv", async (req, res) => {
+    const report = await buildAuditReadinessReport(typeof req.query.auditId === "string" ? req.query.auditId : "AUD-026");
     res.setHeader("Content-Disposition", `attachment; filename=part21-${report.audit.id.toLowerCase()}-readiness.csv`);
     res.type("text/csv").send(reportToCsv(report));
   });

@@ -1,6 +1,4 @@
 import { regulatoryTraceForFinding } from "../shared/regulatory";
-import { getFindingOntologyContext, getTemporalHistory } from "../shared/ontology";
-import { graphNodes } from "../shared/demo";
 import { applicationSkills } from "../shared/ecc";
 import { auditSkills } from "../shared/skills";
 import { invokeLLM } from "./_core/llm";
@@ -22,10 +20,10 @@ export function configureAiProvider(provider: "openai" | "anthropic", key: strin
   return { ok: true, status: getAiStatus(), message: "Provider status updated in the demo runtime. Production deployment should use a secret manager, not browser storage." };
 }
 
-export function answerGroundedQuestion(question: string) {
+export async function answerGroundedQuestion(question: string) {
   const normalized = question.toLowerCase();
-  const context = getFindingOntologyContext("FIND-2026-04");
-  const history = getTemporalHistory("finding-2026-04");
+  const context = await getGroundedGraphContext("FIND-2026-04");
+  const history = context.temporalEvents;
   let appliedSkill = "finding-challenge";
   let followUpQuestions = ["What evidence would disprove or downgrade that signal?", "Who must approve the provisional severity?", "Should I open the finding challenge skill?"];
   let answer = "The grounded assurance agent found no direct match in the synthetic graph. Try asking about a finding, Part 21 provision, supplier, change, evidence chain, risk, or remediation.";
@@ -33,13 +31,13 @@ export function answerGroundedQuestion(question: string) {
   else if (normalized.includes("changed") || normalized.includes("baseline")) { appliedSkill = "trace-chain"; followUpQuestions = ["Should I trace upstream to the supplier and material lot?", "Which revision should be treated as the accepted baseline?", "Do you want to open the temporal trace skill?"]; answer = `The temporal chain shows ${history.length} recorded events. The highest-impact transition is CHG-014, a supplier material substitution that preceded the F-042 finding and left two evidence records requiring revalidation.`; }
   else if (normalized.includes("requirement") || normalized.includes("part 21") || normalized.includes("regulation")) { appliedSkill = "frame-scope"; followUpQuestions = ["Which requirement family should I apply first: 21.21, 21.51, or 21.61?", "What client-approved procedure controls the interpretation?", "Should I load the scope framing skill?"]; answer = `The current finding traverses ${regulatoryTraceForFinding.path.slice(2).join(" → ")}. The system treats §21.21 evaluation, §21.51 records, and §21.61 failure-to-notify as candidate regulatory bases; a client-approved interpretation and human reportability decision are still required.`; }
   else if (normalized.includes("risk") || normalized.includes("impact")) { appliedSkill = "evidence-intake"; followUpQuestions = ["Which source systems should be queried next?", "What effective-date window should the evidence cover?", "Should I open the evidence intake skill?"]; answer = `Current modeled risk is ${regulatoryTraceForFinding.risk}. If the evidence chain remains unresolved, the organization may be unable to demonstrate traceability and may miss a timely evaluation or notification decision.`; }
-  else if (normalized.includes("who") || normalized.includes("involved")) { appliedSkill = "frame-scope"; followUpQuestions = ["Which accountable role should own the next action?", "Which delegated roles must acknowledge the audit?", "Should I open the scope framing skill?"]; answer = `The graph context includes ${graphNodes.filter((node) => node.type === "person").map((person) => person.label).join(", ")}. Each relationship is synthetic until confirmed against the people directory and audit decision ledger.`; }
+  else if (normalized.includes("who") || normalized.includes("involved")) { appliedSkill = "frame-scope"; followUpQuestions = ["Which accountable role should own the next action?", "Which delegated roles must acknowledge the audit?", "Should I open the scope framing skill?"]; answer = `The database graph context includes ${context.nodes.filter((node: any) => node.type === "person").map((person: any) => person.label).join(", ") || "no person nodes"}. People and role links must remain tied to the audit decision ledger.`; }
   const skill = [...auditSkills, ...applicationSkills].find((candidate) => candidate.id === appliedSkill) ?? [...auditSkills, ...applicationSkills].find((candidate) => candidate.id === "finding-challenge") ?? auditSkills[0];
-  return { question, answer, appliedSkill, skillInvocation: { skillId: skill.id, name: skill.name, route: skill.route, contract: skill.skillContract, humanGate: skill.humanGate, invokedAt: new Date().toISOString(), invocationMode: "deterministic local router · provider not invoked" }, followUpQuestions, grounding: { findingId: "FIND-2026-04", graphEntities: graphNodes.length, temporalEvents: history.length, regulatoryPath: regulatoryTraceForFinding.path, sourceIds: ["FIND-2026-04", "AUD-026", "EV-803", "CHG-014"] }, provider: configuredProvider ? `${configuredProvider} configured · deterministic fallback · LLM not invoked` : "demo-grounded · no LLM invoked", humanReviewRequired: true };
+  return { question, answer, appliedSkill, skillInvocation: { skillId: skill.id, name: skill.name, route: skill.route, contract: skill.skillContract, humanGate: skill.humanGate, invokedAt: new Date().toISOString(), invocationMode: "database-grounded router · provider not invoked" }, followUpQuestions, grounding: { findingId: "FIND-2026-04", graphEntities: context.nodes.length, temporalEvents: history.length, regulatoryPath: regulatoryTraceForFinding.path, sourceIds: context.sourceIds }, provider: configuredProvider ? `${configuredProvider} configured · database-grounded router · LLM not invoked` : "database-grounded router · no LLM invoked", humanReviewRequired: true };
 }
 
 export async function answerLiveGroundedQuestion(question: string) {
-  const grounded = answerGroundedQuestion(question);
+  const grounded = await answerGroundedQuestion(question);
   const graphContext = await getGroundedGraphContext("FIND-2026-04");
   const contextPacket = {
     activeAudit: "AUD-026",

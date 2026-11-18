@@ -7,14 +7,8 @@ let _db: ReturnType<typeof drizzle> | null = null;
 
 // Lazily create the drizzle instance so local tooling can run without a DB.
 export async function getDb() {
-  if (!_db && process.env.DATABASE_URL) {
-    try {
-      _db = drizzle(process.env.DATABASE_URL);
-    } catch (error) {
-      console.warn("[Database] Failed to connect:", error);
-      _db = null;
-    }
-  }
+  if (!process.env.DATABASE_URL) throw new Error("DATABASE_URL is required; in-memory database fallback is disabled.");
+  if (!_db) _db = drizzle(process.env.DATABASE_URL);
   return _db;
 }
 
@@ -24,10 +18,6 @@ export async function upsertUser(user: InsertUser): Promise<void> {
   }
 
   const db = await getDb();
-  if (!db) {
-    throw new Error("Database is not available");
-  }
-
   try {
     const values: InsertUser = {
       openId: user.openId,

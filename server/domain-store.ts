@@ -1,0 +1,79 @@
+import crypto from "node:crypto";
+import { createPool, type Pool } from "mysql2/promise";
+import { audits, controls, evidence, findings, metrics, sources, graphNodes } from "../shared/demo";
+
+type DomainRecord = { recordType: string; recordId: string; auditId?: string | null; payload: unknown };
+let pool: Pool | null = null;
+let initialized = false;
+
+function getPool() {
+  if (!process.env.DATABASE_URL) throw new Error("DATABASE_URL is required; demo fallback is disabled.");
+  if (!pool) pool = createPool({ uri: process.env.DATABASE_URL, connectionLimit: 5 });
+  return pool;
+}
+
+export async function ensureDomainStore() {
+  if (initialized) return;
+  const db = getPool();
+  await db.query(`CREATE TABLE IF NOT EXISTS part21_domain_records (record_type VARCHAR(80) NOT NULL, record_id VARCHAR(180) NOT NULL, audit_id VARCHAR(180) NULL, payload JSON NOT NULL, content_sha256 VARCHAR(64) NULL, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP, PRIMARY KEY (record_type, record_id), INDEX idx_domain_audit (audit_id), INDEX idx_domain_type (record_type))`);
+  initialized = true;
+  await seedDomainRecords();
+}
+
+async function seedDomainRecords() {
+  const db = getPool();
+  const [rows] = await db.query<any[]>("SELECT COUNT(*) AS count FROM part21_domain_records");
+  if (Number(rows[0]?.count ?? 0) > 0) return;
+  const seed = [
+    ...audits.map((item) => ({ recordType: "audit", recordId: item.id, auditId: item.id, payload: item })),
+    ...findings.map((item) => ({ recordType: "finding", recordId: item.id, auditId: "AUD-026", payload: item })),
+    ...evidence.map((item) => ({ recordType: "evidence", recordId: item.id, auditId: "AUD-026", payload: item })),
+    ...controls.map((item) => ({ recordType: "control", recordId: item.id, auditId: "AUD-026", payload: item })),
+    ...sources.map((item) => ({ recordType: "source", recordId: item.name, auditId: "AUD-026", payload: item })),
+    { recordType: "metric", recordId: "AUD-026", auditId: "AUD-026", payload: metrics },
+    ...graphNodes.filter((node) => node.type === "supplier").map((node) => ({ recordType: "supplier", recordId: node.id, auditId: "AUD-026", payload: node })),
+    ...graphNodes.filter((node) => node.type === "change").map((node) => ({ recordType: "change", recordId: node.id, auditId: "AUD-026", payload: node })),
+    ...graphNodes.filter((node) => node.type === "product").map((node) => ({ recordType: "product", recordId: node.id, auditId: "AUD-026", payload: node })),
+  ];
+  for (const item of seed) await upsertDomainRecord(item);
+}
+
+export async function upsertDomainRecord(record: DomainRecord & { content?: Buffer }) {
+  const db = getPool();
+  const contentSha256 = record.content ? crypto.createHash("sha256").update(record.content).digest("hex") : null;
+  await db.query(`INSERT INTO part21_domain_records (record_type, record_id, audit_id, payload, content_sha256) VALUES (?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE audit_id=VALUES(audit_id), payload=VALUES(payload), content_sha256=VALUES(content_sha256), updated_at=CURRENT_TIMESTAMP`, [record.recordType, record.recordId, record.auditId ?? null, JSON.stringify(record.payload), contentSha256]);
+  return { ...record, contentSha256 };
+}
+
+export async function getDomainRecord<T extends Record<string, unknown>>(recordType: string, recordId: string): Promise<T | null> {
+  await ensureDomainStore();
+  const db = getPool();
+  const [rows] = await db.query<any[]>("SELECT payload FROM part21_domain_records WHERE record_type=? AND record_id=? LIMIT 1", [recordType, recordId]);
+  return rows[0]?.payload ? (typeof rows[0].payload === "string" ? JSON.parse(rows[0].payload) : rows[0].payload) as T : null;
+}
+
+export async function listDomainRecords<T extends Record<string, unknown>>(recordType: string, auditId?: string): Promise<T[]> {
+  await ensureDomainStore();
+  const db = getPool();
+  const [rows] = await db.query<any[]>(auditId ? "SELECT payload FROM part21_domain_records WHERE record_type=? AND audit_id=? ORDER BY updated_at DESC" : "SELECT payload FROM part21_domain_records WHERE record_type=? ORDER BY updated_at DESC", auditId ? [recordType, auditId] : [recordType]);
+  return rows.map((row) => (typeof row.payload === "string" ? JSON.parse(row.payload) : row.payload) as T);
+}
+
+export async function getDomainPortfolio(auditId = "AUD-026") {
+  await ensureDomainStore();
+  const [audit, auditFindings, auditEvidence, auditControls, auditSources, auditMetrics, suppliers, changes] = await Promise.all([
+    getDomainRecord("audit", auditId), listDomainRecords("finding", auditId), listDomainRecords("evidence", auditId), listDomainRecords("control", auditId), listDomainRecords("source", auditId), getDomainRecord("metric", auditId), listDomainRecords("supplier", auditId), listDomainRecords("change", auditId),
+  ]);
+  return { source: "mysql-database", audit, findings: auditFindings, evidence: auditEvidence, controls: auditControls, sources: auditSources, metrics: auditMetrics, suppliers, changes };
+}
+
+export async function listAudits() {
+  return listDomainRecords("audit");
+}
+
+export async function getDomainStoreStatus() {
+  await ensureDomainStore();
+  const db = getPool();
+  const [rows] = await db.query<any[]>("SELECT record_type AS recordType, COUNT(*) AS count FROM part21_domain_records GROUP BY record_type ORDER BY record_type");
+  return { source: "mysql-database", table: "part21_domain_records", counts: rows };
+}

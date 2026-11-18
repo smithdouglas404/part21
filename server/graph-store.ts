@@ -1,7 +1,6 @@
 import { createPool, Pool } from "mysql2/promise";
 import { graphEdges, graphNodes } from "../shared/demo";
 import { temporalRecords } from "../shared/ontology";
-import { getTemporalHistory } from "../shared/ontology";
 
 let pool: Pool | null = null;
 let initialized = false;
@@ -12,13 +11,13 @@ const graphSchema = [
 ];
 
 function getPool() {
-  if (!pool && process.env.DATABASE_URL) pool = createPool({ uri: process.env.DATABASE_URL, connectionLimit: 5 });
+  if (!process.env.DATABASE_URL) throw new Error("DATABASE_URL is required; graph fallback is disabled.");
+  if (!pool) pool = createPool({ uri: process.env.DATABASE_URL, connectionLimit: 5 });
   return pool;
 }
 
 export async function ensureGraphStore() {
   const db = getPool();
-  if (!db) return { configured: false, source: "synthetic-fallback", reason: "DATABASE_URL is not configured" };
   if (!initialized) {
     await db.query(`CREATE TABLE IF NOT EXISTS part21_graph_nodes (id VARCHAR(180) PRIMARY KEY, node_type VARCHAR(80) NOT NULL, label VARCHAR(255) NOT NULL, subtitle TEXT, status VARCHAR(50), payload JSON NOT NULL, updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP)`);
     await db.query(`CREATE TABLE IF NOT EXISTS part21_graph_edges (id VARCHAR(220) PRIMARY KEY, from_id VARCHAR(180) NOT NULL, to_id VARCHAR(180) NOT NULL, relation VARCHAR(100) NOT NULL, label VARCHAR(255), payload JSON NOT NULL, updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP, INDEX idx_graph_edges_from (from_id), INDEX idx_graph_edges_to (to_id))`);
@@ -31,7 +30,6 @@ export async function ensureGraphStore() {
 export async function syncGraphSeed() {
   const status = await ensureGraphStore();
   const db = getPool();
-  if (!db) return { ...status, insertedNodes: 0, insertedEdges: 0, insertedEvents: 0 };
   for (const node of graphNodes) {
     await db.query(`INSERT IGNORE INTO part21_graph_nodes (id, node_type, label, subtitle, status, payload) VALUES (?, ?, ?, ?, ?, ?)`, [node.id, node.type, node.label, node.meta ?? null, node.status ?? null, JSON.stringify(node)]);
   }
@@ -49,9 +47,6 @@ export async function syncGraphSeed() {
 export async function getGroundedGraphContext(findingId = "FIND-2026-04") {
   const status = await ensureGraphStore();
   const db = getPool();
-  if (!db) {
-    return { ...status, findingId, schema: graphSchema, nodes: graphNodes, edges: graphEdges, temporalEvents: getTemporalHistory("finding-2026-04"), sourceIds: graphNodes.map((node) => node.id) };
-  }
   await syncGraphSeed();
   const [nodes] = await db.query<any[]>(`SELECT id, node_type AS type, label, subtitle, status, payload FROM part21_graph_nodes ORDER BY id`);
   const [edges] = await db.query<any[]>(`SELECT id, from_id AS \`from\`, to_id AS \`to\`, relation, label, payload FROM part21_graph_edges ORDER BY id`);
@@ -65,5 +60,5 @@ function parseJson(value: unknown) {
 }
 
 export async function graphStoreStatus() {
-  try { return await syncGraphSeed(); } catch (error) { return { configured: true, source: "database-unavailable-fallback", reason: error instanceof Error ? error.message : "Database error" }; }
+  return syncGraphSeed();
 }

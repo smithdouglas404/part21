@@ -5,6 +5,7 @@ import { getFindingOntologyContext, ontologyMappings, part21Ontology, temporalRe
 import { assessRemediationImpact, part21RegulatoryPack, traverseRegulatoryTree } from "../shared/regulatory";
 import { applicationSkills, getEccCatalog } from "../shared/ecc";
 import { part21PolicyPack } from "../shared/policy";
+import { getDomainPortfolio } from "./domain-store";
 
 export function getAgentKitManifest() {
   return {
@@ -89,8 +90,11 @@ export function runAuditSkill(skillId: string, answers: Record<string, unknown> 
   };
 }
 
-export function buildAuditReadinessReport(auditId = "AUD-026") {
-  const audit = audits.find((item) => item.id === auditId) ?? audits[0];
+export async function buildAuditReadinessReport(auditId = "AUD-026") {
+  const portfolio = await getDomainPortfolio(auditId);
+  if (!portfolio.audit) throw new Error(`Audit ${auditId} was not found in the database.`);
+  const audit = portfolio.audit as any;
+  const domainMetrics = portfolio.metrics as any;
   return {
     reportType: "audit-readiness",
     reportVersion: "0.1-demo",
@@ -98,18 +102,18 @@ export function buildAuditReadinessReport(auditId = "AUD-026") {
     dataMode: "synthetic",
     audit,
     executivePosition: "Ready with actions",
-    metrics,
-    controls,
-    findings,
-    evidence,
-    sources,
+    metrics: domainMetrics,
+    controls: portfolio.controls,
+    findings: portfolio.findings,
+    evidence: portfolio.evidence,
+    sources: portfolio.sources,
     agentRecommendation: "Resolve F-042 evidence chain before accepting CHG-014 into the configuration baseline.",
     humanDecisionsRequired: ["Confirm scope", "Accept evidence sufficiency", "Approve finding severity", "Approve report disposition"],
     traceabilityNote: "This report preserves links to synthetic source records and is not a regulatory determination.",
   };
 }
 
-export function reportToCsv(report: ReturnType<typeof buildAuditReadinessReport>) {
+export function reportToCsv(report: Awaited<ReturnType<typeof buildAuditReadinessReport>>) {
   const rows = [
     ["Report type", report.reportType], ["Report version", report.reportVersion], ["Generated at", report.generatedAt], ["Data mode", report.dataMode], ["Audit", report.audit.id], ["Audit title", report.audit.title], ["Executive position", report.executivePosition], ["Readiness", `${report.metrics.readiness}%`], ["Open findings", String(report.metrics.openFindings)], ["Supplier exposure", String(report.metrics.supplierExposure)], ["Agent recommendation", report.agentRecommendation], ["Traceability note", report.traceabilityNote],
     [], ["Finding ID", "Title", "Severity", "Status", "Owner", "Age"], ...report.findings.map((finding) => [finding.id, finding.title, finding.severity, finding.status, finding.owner, finding.age]),
