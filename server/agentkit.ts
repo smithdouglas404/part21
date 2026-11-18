@@ -3,7 +3,7 @@ import { auditPhases, auditSkills, agentKitAgents, getSkillForPhase } from "../s
 import { mcpConnectors, simulatedFinding, type SimulationStep } from "../shared/execution";
 import { getFindingOntologyContext, ontologyMappings, part21Ontology, temporalRecords } from "../shared/ontology";
 import { assessRemediationImpact, part21RegulatoryPack, traverseRegulatoryTree } from "../shared/regulatory";
-import { getEccCatalog } from "../shared/ecc";
+import { applicationSkills, getEccCatalog } from "../shared/ecc";
 import { part21PolicyPack } from "../shared/policy";
 
 export function getAgentKitManifest() {
@@ -12,7 +12,7 @@ export function getAgentKitManifest() {
     version: "0.1.0",
     executionContract: { standard: "ECC-compatible open-source skill module", source: getEccCatalog().repository, localSkillPack: getEccCatalog().localPack },
     agents: agentKitAgents,
-    skills: auditSkills.map(({ questions, ...skill }) => ({ ...skill, questionCount: questions.length })),
+    skills: [...auditSkills, ...applicationSkills].map(({ questions, ...skill }) => ({ ...skill, questionCount: questions.length })),
     phases: auditPhases,
     connectors: mcpConnectors,
     ontology: { id: part21Ontology.id, version: part21Ontology.version, temporalModel: part21Ontology.temporalModel, classCount: part21Ontology.classes.length, relationCount: part21Ontology.relations.length },
