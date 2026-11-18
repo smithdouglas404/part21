@@ -21,7 +21,7 @@ export interface SimulationToolCall {
 export interface HumanGateApproval {
   gate: string;
   approver: string;
-  decision: "Approved" | "Approved with action";
+  decision: "Approved" | "Approved with action" | "Pending qualified approval";
   rationale: string;
   timestamp: string;
 }
@@ -34,6 +34,7 @@ export interface SimulationStep {
   route: string;
   status: "Completed";
   toolCalls: SimulationToolCall[];
+  traversalProof?: { queryFindingId: string; visitedNodeIds: string[]; traversedEdgeIds: string[]; temporalEventIds: string[]; source: string; ontologyVersion?: string };
   humanGate: HumanGateApproval;
 }
 

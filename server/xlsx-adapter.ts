@@ -2,143 +2,20 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import XLSX from "xlsx";
-import { appendAssuranceEvent, listAssuranceEvents } from "./event-store";
+import { appendAssuranceEvent, listAssuranceEvents, type AssuranceEvent } from "./event-store";
 
-export type WorkbookSnapshot = {
-  id: string;
-  name: string;
-  source: string;
-  actor: string;
-  importedAt: string;
-  sha256: string;
-  sizeBytes: number;
-  sheets: Array<{ name: string; rows: number; columns: number; sample: Record<string, unknown>[] }>;
-  status: "parsed" | "pending_human_import";
-};
-
-const sampleWorkbooks = [
-  { id: "sample-supplier", name: "part21-supplier-sample.xlsx", href: "/samples/part21-supplier-sample.xlsx", purpose: "Supplier master and supplier-change notifications", sheets: ["Suppliers", "SupplierChanges"] },
-  { id: "sample-audit", name: "part21-audit-inputs.xlsx", href: "/samples/part21-audit-inputs.xlsx", purpose: "Findings, evidence, and engineering changes", sheets: ["Findings", "Evidence", "Changes"] },
-];
-
+export type WorkbookSnapshot = { id: string; name: string; source: string; actor: string; importedAt: string; sha256: string; sizeBytes: number; sheets: Array<{ name: string; rows: number; columns: number; sample: Record<string, unknown>[] }>; status: "parsed" | "pending_human_import" };
+const sampleWorkbooks = [{ id: "sample-supplier", name: "part21-supplier-sample.xlsx", href: "/samples/part21-supplier-sample.xlsx", purpose: "Supplier master and supplier-change notifications", sheets: ["Suppliers", "SupplierChanges"] }, { id: "sample-audit", name: "part21-audit-inputs.xlsx", href: "/samples/part21-audit-inputs.xlsx", purpose: "Findings, evidence, and engineering changes", sheets: ["Findings", "Evidence", "Changes"] }];
 const excelRoot = process.env.EXCEL_ROOT || path.resolve(process.cwd(), "data/excel-inbox");
-const priorImport = listAssuranceEvents({ type: "excel.workbook_imported" }).at(-1);
-let lastSnapshot: WorkbookSnapshot | null = priorImport?.payload.snapshot as WorkbookSnapshot | null;
-
-function parseRows(sheet: XLSX.WorkSheet) {
-  return XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, { defval: null, raw: false });
-}
-
-export function getExcelAdapterStatus() {
-  return {
-    adapter: "excel-workbook-adapter",
-    protocol: "MCP Streamable HTTP + stdio bridge",
-    liveMcpConnection: true,
-    provider: "Local XLSX parser with EXCEL_ROOT directory access",
-    excelRoot,
-    productionTarget: "Point EXCEL_ROOT at the client-owned directory or replace the adapter with a client-hosted Excel MCP server.",
-    toolNames: ["excel_list_workbooks", "excel_describe_workbook", "excel_read_range", "excel_import_workbook", "excel_import_local_workbook", "excel_compare_revision", "excel_approve_import"],
-    safety: "Upload creates a human-gated import proposal; it does not mutate the assurance graph automatically.",
-    lastSnapshot,
-  };
-}
-
-export function listLocalWorkbooks() {
-  fs.mkdirSync(excelRoot, { recursive: true });
-  const files = fs.readdirSync(excelRoot, { withFileTypes: true }).filter((entry) => entry.isFile() && /\.(xlsx|xlsm|xltx)$/i.test(entry.name)).map((entry) => {
-    const fullPath = path.join(excelRoot, entry.name);
-    const stat = fs.statSync(fullPath);
-    return { filename: entry.name, path: fullPath, sizeBytes: stat.size, modifiedAt: stat.mtime.toISOString() };
-  });
-  return { root: excelRoot, files, adapter: getExcelAdapterStatus() };
-}
-
-export function syncLocalWorkbooks(actor = "Weekly source synchronization") {
-  const files = listLocalWorkbooks().files;
-  const importedEvents = listAssuranceEvents({ type: "excel.workbook_imported" });
-  const results = files.map((file) => {
-    const buffer = fs.readFileSync(file.path);
-    const sha256 = crypto.createHash("sha256").update(buffer).digest("hex");
-    const prior = importedEvents.slice().reverse().find((event) => (event.payload.snapshot as WorkbookSnapshot | undefined)?.name === file.filename);
-    const priorSnapshot = prior?.payload.snapshot as WorkbookSnapshot | undefined;
-    if (priorSnapshot?.sha256 === sha256) return { filename: file.filename, status: "unchanged", sha256, priorWorkbookId: priorSnapshot.id };
-    const imported = importLocalWorkbook(file.filename, actor) as any;
-    return { filename: file.filename, status: imported.ok ? "changed_and_imported" : "error", sha256, workbookId: imported.ok ? imported.snapshot.id : undefined, diff: imported.ok ? imported.diff : undefined, error: imported.ok ? undefined : imported.error };
-  });
-  return { root: excelRoot, checkedAt: new Date().toISOString(), filesChecked: files.length, results, humanGate: "Changed workbook revisions require qualified human approval before authoritative graph promotion." };
-}
-
-export function listSampleWorkbooks() {
-  return { samples: sampleWorkbooks, adapter: getExcelAdapterStatus() };
-}
-
-export function importWorkbookPayload(payload: { filename?: string; base64?: string; actor?: string; source?: string }) {
-  if (!payload.base64) return { ok: false, error: "A base64 workbook payload is required." };
-  const buffer = Buffer.from(payload.base64.replace(/^data:.*?;base64,/, ""), "base64");
-  if (buffer.length === 0) return { ok: false, error: "The uploaded workbook is empty." };
-  const sha256 = crypto.createHash("sha256").update(buffer).digest("hex");
-  const workbook = XLSX.read(buffer, { type: "buffer", cellDates: true });
-  const sheets = workbook.SheetNames.map((name) => {
-    const rows = parseRows(workbook.Sheets[name]);
-    const columns = rows.length ? Object.keys(rows[0]).length : 0;
-    return { name, rows: rows.length, columns, sample: rows.slice(0, 5) };
-  });
-  const snapshot: WorkbookSnapshot = {
-    id: `WB-${new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14)}`,
-    name: payload.filename || "uploaded-workbook.xlsx",
-    source: payload.source || "Admin upload",
-    actor: payload.actor || "Jordan Lewis",
-    importedAt: new Date().toISOString(),
-    sha256,
-    sizeBytes: buffer.length,
-    sheets,
-    status: "pending_human_import",
-  };
-  const previous = lastSnapshot;
-  lastSnapshot = snapshot;
-  const event = appendAssuranceEvent({ type: "excel.workbook_imported", actor: snapshot.actor, entityId: snapshot.id, payload: { snapshot, diff: compareSnapshots(previous, snapshot), importProposal: { status: "human_review_required", action: "Approve graph import", reason: "Workbook rows can change supplier, finding, evidence, and change context." } } });
-  return { ok: true, snapshot, previous, diff: compareSnapshots(previous, snapshot), event, importProposal: { status: "human_review_required", action: "Approve graph import", reason: "Workbook rows can change supplier, finding, evidence, and change context." } };
-}
-
-export function importLocalWorkbook(filename: string, actor = "Local MCP caller") {
-  const resolved = path.resolve(excelRoot, filename);
-  if (!resolved.startsWith(`${path.resolve(excelRoot)}${path.sep}`)) return { ok: false, error: "Workbook path must remain inside EXCEL_ROOT." };
-  if (!fs.existsSync(resolved)) return { ok: false, error: `Workbook not found in EXCEL_ROOT: ${filename}` };
-  const buffer = fs.readFileSync(resolved);
-  return importWorkbookPayload({ filename: path.basename(resolved), base64: buffer.toString("base64"), actor, source: `EXCEL_ROOT:${excelRoot}` });
-}
-
-export function approveWorkbookImport(workbookId: string, actor: string, note = "Approved after human review") {
-  if (!lastSnapshot || lastSnapshot.id !== workbookId) return { ok: false, error: "Workbook revision is not the current pending revision." };
-  const transactionTime = new Date().toISOString();
-  const graphProjection = lastSnapshot.sheets.flatMap((sheet) => sheet.sample.map((row, index) => ({ id: `${workbookId}:${sheet.name}:${index + 1}`, type: sheet.name, source: lastSnapshot?.name, properties: row })));
-  const event = appendAssuranceEvent({ type: "excel.graph_import_approved", actor, entityId: workbookId, payload: { workbookId, note, validTime: lastSnapshot.importedAt, transactionTime, graphMutation: "durable_bitemporal_overlay_persisted", graphProjection } });
-  return { ok: true, status: "approved_and_persisted", event, graphProjectionCount: graphProjection.length, warning: "The durable workbook overlay is persisted. Client-qualified ontology mapping is still required before promoting rows into authoritative system-of-record entities." };
-}
-
-export function listPendingWorkbookApprovals() {
-  const imported = listAssuranceEvents({ type: "excel.workbook_imported" });
-  const approved = new Set(listAssuranceEvents({ type: "excel.graph_import_approved" }).map((event) => event.entityId));
-  return imported.filter((event) => !approved.has(event.entityId)).map((event) => ({ workbookId: event.entityId, importedAt: event.occurredAt, actor: event.actor, snapshot: event.payload.snapshot, diff: event.payload.diff, approvalStatus: "pending_human_review" }));
-}
-
-export function compareSnapshots(previous: WorkbookSnapshot | null, current: WorkbookSnapshot | null = lastSnapshot) {
-  if (!current) return { status: "no_snapshot", changed: [], addedSheets: [], removedSheets: [] };
-  if (!previous) return { status: "baseline_created", changed: current.sheets.flatMap((sheet) => sheet.sample.map((row) => ({ sheet: sheet.name, change: "baseline row", row }))), addedSheets: current.sheets.map((sheet) => sheet.name), removedSheets: [] };
-  const previousByName = new Map(previous.sheets.map((sheet) => [sheet.name, sheet]));
-  const currentByName = new Map(current.sheets.map((sheet) => [sheet.name, sheet]));
-  const changed: Array<Record<string, unknown>> = [];
-  for (const sheet of current.sheets) {
-    const oldSheet = previousByName.get(sheet.name);
-    if (!oldSheet) {
-      for (const row of sheet.sample) changed.push({ sheet: sheet.name, change: "sheet added", row });
-      continue;
-    }
-    if (JSON.stringify(oldSheet.sample) !== JSON.stringify(sheet.sample)) changed.push({ sheet: sheet.name, change: "sample rows changed", before: oldSheet.sample, after: sheet.sample });
-  }
-  return { status: changed.length ? "changes_detected" : "no_sample_changes", changed, addedSheets: current.sheets.filter((s) => !previousByName.has(s.name)).map((s) => s.name), removedSheets: previous.sheets.filter((s) => !currentByName.has(s.name)).map((s) => s.name) };
-}
-
-export function readWorkbookSample() {
-  return lastSnapshot ? { snapshot: lastSnapshot, adapter: getExcelAdapterStatus() } : { error: "No workbook uploaded yet." };
-}
+function parseRows(sheet: XLSX.WorkSheet) { return XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, { defval: null, raw: false }); }
+async function latestSnapshot() { const events = await listAssuranceEvents({ type: "excel.workbook_imported" }); return events.at(-1)?.payload.snapshot as WorkbookSnapshot | undefined; }
+export async function getExcelAdapterStatus() { return { adapter: "excel-workbook-adapter", protocol: "MCP Streamable HTTP + stdio bridge", liveMcpConnection: true, provider: "Local XLSX parser with EXCEL_ROOT directory access", excelRoot, productionTarget: "Point EXCEL_ROOT at the client-owned directory or replace the adapter with a client-hosted Excel MCP server.", toolNames: ["excel_list_workbooks", "excel_describe_workbook", "excel_read_range", "excel_import_workbook", "excel_import_local_workbook", "excel_compare_revision", "excel_approve_import"], safety: "Upload creates a human-gated import proposal; it does not mutate the assurance graph automatically.", lastSnapshot: await latestSnapshot() }; }
+export async function listLocalWorkbooks() { fs.mkdirSync(excelRoot, { recursive: true }); const files = fs.readdirSync(excelRoot, { withFileTypes: true }).filter((entry) => entry.isFile() && /\.(xlsx|xlsm|xltx)$/i.test(entry.name)).map((entry) => { const fullPath = path.join(excelRoot, entry.name); const stat = fs.statSync(fullPath); return { filename: entry.name, path: fullPath, sizeBytes: stat.size, modifiedAt: stat.mtime.toISOString() }; }); return { root: excelRoot, files, adapter: await getExcelAdapterStatus() }; }
+export async function syncLocalWorkbooks(actor = "Weekly source synchronization") { const files = (await listLocalWorkbooks()).files; const importedEvents = await listAssuranceEvents({ type: "excel.workbook_imported" }); const results: Array<Record<string, unknown>> = []; for (const file of files) { const buffer = fs.readFileSync(file.path); const sha256 = crypto.createHash("sha256").update(buffer).digest("hex"); const prior = importedEvents.slice().reverse().find((event) => (event.payload.snapshot as WorkbookSnapshot | undefined)?.name === file.filename); const priorSnapshot = prior?.payload.snapshot as WorkbookSnapshot | undefined; if (priorSnapshot?.sha256 === sha256) { results.push({ filename: file.filename, status: "unchanged", sha256, priorWorkbookId: priorSnapshot.id }); continue; } const imported = await importLocalWorkbook(file.filename, actor); if (!("snapshot" in imported) || !imported.snapshot) { results.push({ filename: file.filename, status: "error", sha256, error: "Workbook import did not return a snapshot." }); continue; } results.push({ filename: file.filename, status: "changed_and_imported", sha256, workbookId: imported.snapshot.id, diff: imported.diff }); } return { root: excelRoot, checkedAt: new Date().toISOString(), filesChecked: files.length, results, humanGate: "Changed workbook revisions require qualified human approval before authoritative graph promotion." }; }
+export async function listSampleWorkbooks() { return { samples: sampleWorkbooks, adapter: await getExcelAdapterStatus() }; }
+export async function importWorkbookPayload(payload: { filename?: string; base64?: string; actor?: string; source?: string }) { if (!payload.base64) return { ok: false, error: "A base64 workbook payload is required." }; const buffer = Buffer.from(payload.base64.replace(/^data:.*?;base64,/, ""), "base64"); if (!buffer.length) return { ok: false, error: "The uploaded workbook is empty." }; const sha256 = crypto.createHash("sha256").update(buffer).digest("hex"); const workbook = XLSX.read(buffer, { type: "buffer", cellDates: true }); const sheets = workbook.SheetNames.map((name) => { const rows = parseRows(workbook.Sheets[name]); return { name, rows: rows.length, columns: rows.length ? Object.keys(rows[0]).length : 0, sample: rows.slice(0, 5) }; }); const snapshot: WorkbookSnapshot = { id: `WB-${crypto.randomUUID().slice(0, 12).toUpperCase()}`, name: payload.filename || "uploaded-workbook.xlsx", source: payload.source || "Admin upload", actor: payload.actor || "MCP caller", importedAt: new Date().toISOString(), sha256, sizeBytes: buffer.length, sheets, status: "pending_human_import" }; const previous = await latestSnapshot() ?? null; const diff = compareSnapshots(previous, snapshot); const event = await appendAssuranceEvent({ type: "excel.workbook_imported", actor: snapshot.actor, entityId: snapshot.id, payload: { snapshot, diff, importProposal: { status: "human_review_required", action: "Approve graph import", reason: "Workbook rows can change supplier, finding, evidence, and change context." } } }); return { ok: true, snapshot, previous, diff, event, importProposal: { status: "human_review_required", action: "Approve graph import", reason: "Workbook rows can change supplier, finding, evidence, and change context." } }; }
+export async function importLocalWorkbook(filename: string, actor = "Local MCP caller") { const resolved = path.resolve(excelRoot, filename); if (!resolved.startsWith(`${path.resolve(excelRoot)}${path.sep}`)) return { ok: false, error: "Workbook path must remain inside EXCEL_ROOT." }; if (!fs.existsSync(resolved)) return { ok: false, error: `Workbook not found in EXCEL_ROOT: ${filename}` }; return importWorkbookPayload({ filename: path.basename(resolved), base64: fs.readFileSync(resolved).toString("base64"), actor, source: `EXCEL_ROOT:${excelRoot}` }); }
+export async function approveWorkbookImport(workbookId: string, actor: string, note = "Approved after human review") { const imported = (await listAssuranceEvents({ type: "excel.workbook_imported" })).find((event) => event.entityId === workbookId); const snapshot = imported?.payload.snapshot as WorkbookSnapshot | undefined; if (!snapshot) return { ok: false, error: "Workbook revision is not a pending database event." }; const approved = (await listAssuranceEvents({ type: "excel.graph_import_approved" })).some((event) => event.entityId === workbookId); if (approved) return { ok: false, error: "Workbook revision has already been approved." }; const graphProjection = snapshot.sheets.flatMap((sheet) => sheet.sample.map((row, index) => ({ id: `${workbookId}:${sheet.name}:${index + 1}`, type: sheet.name, source: snapshot.name, properties: row }))); const event = await appendAssuranceEvent({ type: "excel.graph_import_approved", actor, entityId: workbookId, payload: { workbookId, note, validTime: snapshot.importedAt, transactionTime: new Date().toISOString(), graphMutation: "durable_bitemporal_overlay_persisted", graphProjection } }); return { ok: true, status: "approved_and_persisted", event, graphProjectionCount: graphProjection.length, warning: "The durable workbook overlay is persisted. Client-qualified ontology mapping is still required before promoting rows into authoritative system-of-record entities." }; }
+export async function listPendingWorkbookApprovals() { const imported = await listAssuranceEvents({ type: "excel.workbook_imported" }); const approved = new Set((await listAssuranceEvents({ type: "excel.graph_import_approved" })).map((event) => event.entityId)); return imported.filter((event) => !approved.has(event.entityId)).map((event) => ({ workbookId: event.entityId, importedAt: event.occurredAt, actor: event.actor, snapshot: event.payload.snapshot, diff: event.payload.diff, approvalStatus: "pending_human_review" })); }
+export function compareSnapshots(previous: WorkbookSnapshot | null, current: WorkbookSnapshot | null) { if (!current) return { status: "no_snapshot", changed: [], addedSheets: [], removedSheets: [] }; if (!previous) return { status: "baseline_created", changed: current.sheets.flatMap((sheet) => sheet.sample.map((row) => ({ sheet: sheet.name, change: "baseline row", row }))), addedSheets: current.sheets.map((sheet) => sheet.name), removedSheets: [] }; const previousByName = new Map(previous.sheets.map((sheet) => [sheet.name, sheet])); const changed: Array<Record<string, unknown>> = []; for (const sheet of current.sheets) { const oldSheet = previousByName.get(sheet.name); if (!oldSheet) { for (const row of sheet.sample) changed.push({ sheet: sheet.name, change: "sheet added", row }); } else if (JSON.stringify(oldSheet.sample) !== JSON.stringify(sheet.sample)) changed.push({ sheet: sheet.name, change: "sample rows changed", before: oldSheet.sample, after: sheet.sample }); } return { status: changed.length ? "changes_detected" : "no_sample_changes", changed, addedSheets: current.sheets.filter((sheet) => !previousByName.has(sheet.name)).map((sheet) => sheet.name), removedSheets: previous.sheets.filter((sheet) => !new Map(current.sheets.map((item) => [item.name, item])).has(sheet.name)).map((sheet) => sheet.name) }; }
+export async function readWorkbookSample() { const snapshot = await latestSnapshot(); return snapshot ? { snapshot, adapter: await getExcelAdapterStatus() } : { error: "No workbook uploaded yet." }; }

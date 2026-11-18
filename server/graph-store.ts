@@ -1,4 +1,5 @@
 import { createPool, Pool } from "mysql2/promise";
+import { part21Ontology } from "../shared/ontology";
 
 let pool: Pool | null = null;
 let initialized = false;
@@ -36,14 +37,31 @@ export async function getGraphStoreStatus() {
   return { ...status, insertedNodes: 0, insertedEdges: 0, insertedEvents: 0, databaseCounts: { nodes: Number(nodes[0]?.count ?? 0), edges: Number(edges[0]?.count ?? 0), events: Number(events[0]?.count ?? 0) }, ingestionRequired: true };
 }
 
-export async function getGroundedGraphContext(findingId = "FIND-2026-04") {
+export async function getGroundedGraphContext(findingId?: string) {
   const status = await ensureGraphStore();
   const db = getPool();
   await ensureGraphStore();
   const [nodes] = await db.query<any[]>(`SELECT id, node_type AS type, label, subtitle, status, payload FROM part21_graph_nodes ORDER BY id`);
   const [edges] = await db.query<any[]>(`SELECT id, from_id AS \`from\`, to_id AS \`to\`, relation, label, payload FROM part21_graph_edges ORDER BY id`);
   const [events] = await db.query<any[]>(`SELECT entity_id AS entityId, valid_from AS validFrom, valid_to AS validTo, recorded_at AS recordedAt, recorded_by AS recordedBy, operation, payload FROM part21_graph_events ORDER BY valid_from, recorded_at`);
-  return { ...status, findingId, schema: graphSchema, nodes: nodes.map((node) => ({ ...node, ...parseJson(node.payload) })), edges: edges.map((edge) => ({ ...edge, ...parseJson(edge.payload) })), temporalEvents: events.map((event) => ({ ...event, payload: parseJson(event.payload) })), sourceIds: nodes.map((node) => node.id) };
+  const hydratedNodes = nodes.map((node) => ({ ...node, ...parseJson(node.payload) }));
+  const resolvedFindingId = findingId || hydratedNodes.find((node) => String(node.type).toLowerCase() === "finding")?.id;
+  if (!resolvedFindingId) throw new Error("No persisted finding node is available for grounded analysis.");
+  const hydratedEdges = edges.map((edge) => ({ ...edge, ...parseJson(edge.payload) }));
+  const temporalEvents = events.map((event) => ({ ...event, payload: parseJson(event.payload) }));
+  return { ...status, findingId: resolvedFindingId, schema: graphSchema, ontologyVersion: part21Ontology.version, nodes: hydratedNodes, edges: hydratedEdges, temporalEvents, sourceIds: hydratedNodes.map((node) => node.id), traversalProof: { queryFindingId: resolvedFindingId, visitedNodeIds: hydratedNodes.map((node) => node.id), traversedEdgeIds: hydratedEdges.map((edge) => edge.id), temporalEventIds: temporalEvents.map((event) => event.entityId), source: "mysql-database" } };
+}
+
+export async function validateGraphOntology() {
+  await ensureGraphStore();
+  const db = getPool();
+  const classes = new Set(part21Ontology.classes.map((item) => item.id.toLowerCase()));
+  const relations = new Set(part21Ontology.relations.map((item) => item.id));
+  const [nodes] = await db.query<any[]>("SELECT id, node_type AS nodeType FROM part21_graph_nodes");
+  const [edges] = await db.query<any[]>("SELECT id, relation FROM part21_graph_edges");
+  const invalidNodes = nodes.filter((node) => !classes.has(String(node.nodeType).toLowerCase()));
+  const invalidEdges = edges.filter((edge) => !relations.has(String(edge.relation)));
+  return { source: "mysql-database", ontologyId: part21Ontology.id, ontologyVersion: part21Ontology.version, nodeCount: nodes.length, edgeCount: edges.length, invalidNodes, invalidEdges, consistent: invalidNodes.length === 0 && invalidEdges.length === 0 };
 }
 
 function parseJson(value: unknown) {

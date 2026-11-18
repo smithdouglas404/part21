@@ -35,7 +35,7 @@ export async function handleMcpJsonRpc(message: any) {
   if (method === "resources/list") return { jsonrpc: "2.0", id, result: { resources: [{ uri: "part21://event-store/status", name: "Assurance event store status", description: "Durable workbook and MCP event-store status", mimeType: "application/json" }, { uri: "part21://mcp/manifest", name: "Part 21 MCP manifest", description: "Application MCP tool and connector manifest", mimeType: "application/json" }] } };
   if (method === "resources/read") {
     const uri = String(message?.params?.uri ?? "");
-    const value = uri === "part21://event-store/status" ? { ...getEventStoreStatus(), recentEvents: listAssuranceEvents().slice(-20) } : getMcpManifest();
+    const value = uri === "part21://event-store/status" ? { ...(await getEventStoreStatus()), recentEvents: (await listAssuranceEvents()).slice(-20) } : getMcpManifest();
     return { jsonrpc: "2.0", id, result: { contents: [{ uri, mimeType: "application/json", text: JSON.stringify(value, null, 2) }] } };
   }
   if (method === "tools/call") {

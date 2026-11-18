@@ -56,21 +56,11 @@ import {
   Zap,
 } from "lucide-react";
 import {
-  activity,
   agentPulse,
-  audits,
-  controls,
-  evidence,
-  findings,
   getGraphNode,
   graphEdges,
   graphNodes,
-  getAuditGraphProjection,
-  getFindingsForAudit,
   mcpTools,
-  metrics,
-  sources,
-  timelineEvents,
   type AuditRecord,
   type ControlRecord,
   type EntityType,
@@ -79,7 +69,7 @@ import {
   type ViewId,
 } from "@shared/demo";
 import { agentKitAgents, auditPhases, auditSkills, type AuditSkillPhase } from "@shared/skills";
-import { mcpConnectors, simulatedFinding, type SimulationStep } from "@shared/execution";
+import { mcpConnectors, type SimulationStep } from "@shared/execution";
 import { part21Ontology } from "@shared/ontology";
 import { applicationSkills, eccCatalog, embeddedEccModule } from "@shared/ecc";
 import { assurancePersonas, type AssurancePersona } from "@shared/personas";
@@ -132,9 +122,16 @@ const entityIcon: Record<EntityType, typeof Activity> = {
 
 type DrawerModel = { eyebrow: string; title: string; subtitle: string; icon: typeof Activity; content: ReactNode };
 type DatabasePortfolio = { source: "mysql-database"; audit: AuditRecord | null; findings: any[]; evidence: any[]; controls: any[]; sources: any[]; metrics: any; suppliers: any[]; changes: any[] };
-const dashboardFindings = [...findings, ...Array.from({ length: 9 }, (_, index) => ({ id: `F-${44 + index}`, title: ["Supplier equivalency statement missing", "Procedure revision not flowed to receiving", "Calibration record past due", "Change impact review not linked", "Training record needs renewal", "Document approval chain incomplete", "Inspection sample lacks objective evidence", "Corrective action effectiveness overdue", "Vendor notification timing unclear"][index], severity: index < 2 ? "Major" : index < 5 ? "Moderate" : "Minor", source: ["Supplier portal", "Document control", "Quality system"][index % 3], owner: ["M. Lee", "A. Patel", "R. Gomez"][index % 3], age: `${6 + index}d`, status: index % 3 === 0 ? "Open" : "Review" }))];
-const supplierExposureRows = [{ supplier: "Asterion Metals", id: "SUP-044", exposure: "High", products: "NSS-4820, NSS-4819", reason: "CHG-014 material substitution" }, { supplier: "Northstar Components", id: "SUP-019", exposure: "Watch", products: "NSS-4772", reason: "2 receiving records need revalidation" }, { supplier: "Helix Inspection", id: "SUP-031", exposure: "Watch", products: "Unit 2 inspection", reason: "Evidence freshness below threshold" }];
-const changeRows = [{ id: "CHG-014", title: "Seat material substitution", owner: "R. Gomez", state: "Review required", impact: "NSS-4820 baseline" }, { id: "CHG-011", title: "Receiving inspection form revision", owner: "A. Patel", state: "Approved", impact: "21.51 records" }, { id: "CHG-009", title: "Supplier portal migration", owner: "J. Chen", state: "Monitoring", impact: "Vendor evidence joins" }, { id: "CHG-006", title: "Calibration procedure update", owner: "M. Lee", state: "Review required", impact: "Inspection confidence" }];
+const dashboardFindings: any[] = [];
+const supplierExposureRows: any[] = [];
+const changeRows: any[] = [];
+const activity: any[] = [];
+const audits: AuditRecord[] = [];
+const evidence: any[] = [];
+const controls: ControlRecord[] = [];
+const sources: any[] = [];
+const timelineEvents: any[] = [];
+const getAuditGraphProjection = (_auditId: string) => ({ nodes: [] as GraphNode[], edges: [] as any[] });
 
 function DetailDrawer({ model, onClose }: { model: DrawerModel; onClose: () => void }) {
   const Icon = model.icon;
@@ -334,9 +331,9 @@ function ControlCard({ control, onRun }: { control: ControlRecord; onRun: (label
   return <button className="control-card" onClick={() => onRun(`${control.id} opened · ${control.next}`)}><div className="control-card-head"><span className="control-id">{control.id}</span><Badge tone={tone} subtle>{control.status}</Badge></div><strong>{control.title}</strong><small>{control.family}</small><div className="control-meter"><div><span style={{ width: `${control.coverage}%`, background: toneColor[tone] }} /></div><b>{control.coverage}%</b></div><p><StatusDot tone={tone} />{control.signal}</p><span className="control-next">Next: {control.next}<ChevronRight size={13} /></span></button>;
 }
 
-function SimulationPanel({ simulation, selectedPhase, onSelectPhase }: { simulation: { finding: typeof simulatedFinding; status: "completed"; steps: SimulationStep[] }; selectedPhase: number; onSelectPhase: (phase: number) => void }) {
+function SimulationPanel({ simulation, selectedPhase, onSelectPhase }: { simulation: { finding: Record<string, unknown>; status: "completed"; steps: SimulationStep[] }; selectedPhase: number; onSelectPhase: (phase: number) => void }) {
   const step = simulation.steps.find((item) => item.phase === selectedPhase) ?? simulation.steps[0];
-  return <article className="panel simulation-panel"><div className="panel-head"><div><SectionKicker icon={Play}>Full AgentKit execution</SectionKicker><h2>{simulation.finding.id} · {simulation.finding.title}</h2><p>Completed simulation · exact tool calls, connector provenance, and human gates</p></div><Badge tone="green">5 / 5 completed</Badge></div><div className="simulation-layout"><div className="simulation-steps">{simulation.steps.map((item) => <button key={item.phase} className={`simulation-step ${selectedPhase === item.phase ? "active" : ""}`} onClick={() => onSelectPhase(item.phase)}><span className="simulation-step-number"><Check size={12} /></span><span><strong>{item.phase}. {item.phaseLabel}</strong><small>{item.agent} · {item.toolCalls.length} tool calls</small></span><Badge tone={item.humanGate.decision === "Approved" ? "green" : "amber"} subtle>{item.humanGate.decision}</Badge></button>)}</div><div className="simulation-detail"><div className="simulation-detail-head"><div><span className="tiny-label">PHASE {step.phase} · {step.route}</span><strong>{step.agent}</strong></div><span className="gate-approved"><CheckCircle2 size={14} />{step.humanGate.gate}</span></div><div className="tool-call-list">{step.toolCalls.map((call) => <div className="tool-call" key={call.sequence}><div className="tool-call-head"><span>#{call.sequence}</span><strong>{call.tool}</strong><Badge tone={call.connector.includes("vendor") ? "amber" : call.connector.includes("document") ? "blue" : "cyan"} subtle>{call.connector}</Badge></div><pre>{JSON.stringify(call.arguments, null, 2)}</pre><div className="tool-result"><CheckCircle2 size={12} /><span>{call.result}</span></div><small>{call.provenance}</small></div>)}</div><div className="human-approval"><div className="approval-icon"><UserRoundCheck size={15} /></div><div><span className="tiny-label">HUMAN GATE APPROVAL</span><strong>{step.humanGate.approver} · {step.humanGate.decision}</strong><p>{step.humanGate.rationale}</p><small>{step.humanGate.timestamp}</small></div></div></div></div></article>;
+  return <article className="panel simulation-panel"><div className="panel-head"><div><SectionKicker icon={Play}>Full AgentKit execution</SectionKicker><h2>{String(simulation.finding.id ?? "Database finding")} · {String(simulation.finding.title ?? "")}</h2><p>Completed simulation · exact tool calls, connector provenance, and human gates</p></div><Badge tone="green">5 / 5 completed</Badge></div><div className="simulation-layout"><div className="simulation-steps">{simulation.steps.map((item) => <button key={item.phase} className={`simulation-step ${selectedPhase === item.phase ? "active" : ""}`} onClick={() => onSelectPhase(item.phase)}><span className="simulation-step-number"><Check size={12} /></span><span><strong>{item.phase}. {item.phaseLabel}</strong><small>{item.agent} · {item.toolCalls.length} tool calls</small></span><Badge tone={item.humanGate.decision === "Approved" ? "green" : "amber"} subtle>{item.humanGate.decision}</Badge></button>)}</div><div className="simulation-detail"><div className="simulation-detail-head"><div><span className="tiny-label">PHASE {step.phase} · {step.route}</span><strong>{step.agent}</strong></div><span className="gate-approved"><CheckCircle2 size={14} />{step.humanGate.gate}</span></div><div className="tool-call-list">{step.toolCalls.map((call) => <div className="tool-call" key={call.sequence}><div className="tool-call-head"><span>#{call.sequence}</span><strong>{call.tool}</strong><Badge tone={call.connector.includes("vendor") ? "amber" : call.connector.includes("document") ? "blue" : "cyan"} subtle>{call.connector}</Badge></div><pre>{JSON.stringify(call.arguments, null, 2)}</pre><div className="tool-result"><CheckCircle2 size={12} /><span>{call.result}</span></div><small>{call.provenance}</small></div>)}</div><div className="human-approval"><div className="approval-icon"><UserRoundCheck size={15} /></div><div><span className="tiny-label">HUMAN GATE APPROVAL</span><strong>{step.humanGate.approver} · {step.humanGate.decision}</strong><p>{step.humanGate.rationale}</p><small>{step.humanGate.timestamp}</small></div></div></div></div></article>;
 }
 
 function VoiceNoteButton({ onTranscript }: { onTranscript: (text: string) => void }) {
@@ -386,7 +383,7 @@ function SkillsView({ onRun }: { onRun: (label: string) => void }) {
   const [complianceFollowUp, setComplianceFollowUp] = useState<any>(null);
   const [checkingAnswer, setCheckingAnswer] = useState(false);
   const [acknowledgedWarnings, setAcknowledgedWarnings] = useState<Record<string, any>>({});
-  const [simulation, setSimulation] = useState<{ finding: typeof simulatedFinding; status: "completed"; steps: SimulationStep[] } | null>(null);
+  const [simulation, setSimulation] = useState<{ finding: Record<string, unknown>; status: "completed"; steps: SimulationStep[] } | null>(null);
   const [selectedSimulationPhase, setSelectedSimulationPhase] = useState(1);
   const skill = auditSkills.find((item) => item.phase === phase) ?? auditSkills[0];
   const phaseIndex = auditPhases.findIndex((item) => item.id === phase);
@@ -412,7 +409,7 @@ function SkillsView({ onRun }: { onRun: (label: string) => void }) {
     if (result.ok) { setAcknowledgedWarnings((current) => ({ ...current, [warning.id]: result.event })); onRun(`Warning ${warning.id} acknowledged · trace persisted`); }
   };
   const simulateFullFlow = async () => {
-    const response = await fetch("/api/agentkit/simulate", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ findingId: simulatedFinding.id }) });
+    const response = await fetch("/api/agentkit/simulate", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({}) });
     const result = await response.json();
     setSimulation(result);
     setSelectedSimulationPhase(1);
@@ -521,7 +518,7 @@ function GroundedChat({ onRun }: { onRun: (label: string) => void }) {
   const [answer, setAnswer] = useState<any>(null);
   const [busy, setBusy] = useState(false);
   const ask = async (nextQuestion = question) => { setBusy(true); const result = await fetch("/api/ai/ask", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ question: nextQuestion }) }).then((response) => response.json()); setAnswer(result); setBusy(false); onRun(`Grounded graph question answered · ${result.appliedSkill} · ${result.provider}`); };
-  return <div className="ai-chat-panel"><div className="ai-chat-intro"><div className="ai-orb"><Sparkles size={17} /></div><div><span className="tiny-label">GROUNDED ASSURANCE COPILOT</span><strong>Ask the graph, not just the dashboard.</strong><p>Questions are grounded in the synthetic knowledge graph, temporal events, evidence records, and source-linked Part 21 trace.</p></div></div><div className="chat-suggestions"><button onClick={() => setQuestion("What would disprove the current finding?")}>What would disprove this finding?</button><button onClick={() => setQuestion("Which Part 21 requirement supports this recommendation?")}>Which requirement supports this?</button><button onClick={() => setQuestion("What changed between the last approved baseline and today?")}>What changed since baseline?</button></div><div className="chat-input-row"><textarea value={question} onChange={(event) => setQuestion(event.target.value)} rows={2} /><button className="primary-button" onClick={() => ask()} disabled={busy || !question.trim()}>{busy ? "Thinking…" : "Ask"}<Sparkles size={14} /></button></div>{answer && <div className="chat-answer"><div className="chat-answer-head"><Badge tone={answer.provider.includes("demo") || answer.provider.includes("fallback") ? "amber" : "green"}>{answer.provider}</Badge><span>Human review required</span></div><div className="chat-skill-applied"><Workflow size={12} /><span>Skill applied: <strong>{answer.appliedSkill}</strong></span><span>Agent map → ECC skill → human gate</span></div>{answer.skillInvocation && <details className="skill-invocation-details"><summary>Inspect dynamic skill invocation</summary><div><strong>{answer.skillInvocation.name}</strong><small>{answer.skillInvocation.route} · {answer.skillInvocation.invocationMode}</small><small>Contract: {answer.skillInvocation.contract}</small><small>Gate: {answer.skillInvocation.humanGate}</small></div></details>}<p>{answer.answer}</p><div className="chat-grounding"><span><Network size={12} />{answer.grounding.graphEntities} graph entities</span><span><History size={12} />{answer.grounding.temporalEvents} temporal events</span><span><FileSearch size={12} />{answer.grounding.regulatoryPath.slice(2).join(" → ")}</span></div><div className="chat-followups"><span className="tiny-label">NEXT QUESTIONS FROM THIS SKILL</span>{answer.followUpQuestions?.map((followUp: string) => <button key={followUp} onClick={() => { setQuestion(followUp); ask(followUp); }}>{followUp}<ChevronRight size={12} /></button>)}</div></div>}</div>;
+  return <div className="ai-chat-panel"><div className="ai-chat-intro"><div className="ai-orb"><Sparkles size={17} /></div><div><span className="tiny-label">GROUNDED ASSURANCE COPILOT</span><strong>Ask the graph, not just the dashboard.</strong><p>Questions are grounded in the synthetic knowledge graph, temporal events, evidence records, and source-linked Part 21 trace.</p></div></div><div className="chat-suggestions"><button onClick={() => setQuestion("What would disprove the current finding?")}>What would disprove this finding?</button><button onClick={() => setQuestion("Which Part 21 requirement supports this recommendation?")}>Which requirement supports this?</button><button onClick={() => setQuestion("What changed between the last approved baseline and today?")}>What changed since baseline?</button></div><div className="chat-input-row"><textarea value={question} onChange={(event) => setQuestion(event.target.value)} rows={2} /><button className="primary-button" onClick={() => ask()} disabled={busy || !question.trim()}>{busy ? "Thinking…" : "Ask"}<Sparkles size={14} /></button></div>{answer && <div className="chat-answer"><div className="chat-answer-head"><Badge tone={answer.provider.includes("demo") || answer.provider.includes("fallback") ? "amber" : "green"}>{answer.provider}</Badge><span>Human review required</span></div><div className="chat-skill-applied"><Workflow size={12} /><span>Skill applied: <strong>{answer.appliedSkill}</strong></span><span>Agent map → ECC skill → human gate</span></div>{answer.skillInvocation && <details className="skill-invocation-details"><summary>Inspect dynamic skill invocation</summary><div><strong>{answer.skillInvocation.name}</strong><small>{answer.skillInvocation.route} · {answer.skillInvocation.invocationMode}</small><small>Contract: {answer.skillInvocation.contract}</small><small>Gate: {answer.skillInvocation.humanGate}</small></div></details>}<p>{answer.answer}</p><div className="chat-grounding"><span><Network size={12} />{answer.grounding.graphEntities} graph entities</span><span><History size={12} />{answer.grounding.temporalEvents} temporal events</span><span><FileSearch size={12} />{answer.grounding.regulatoryPath.slice(2).join(" → ")}</span></div>{answer.traversalProof && <div className="chat-grounding"><span><DatabaseZap size={12} />Traversed {answer.traversalProof.visitedNodeIds?.length ?? 0} nodes</span><span><Link2 size={12} />{answer.traversalProof.traversedEdgeIds?.length ?? 0} graph edges</span><span><CheckCircle2 size={12} />{answer.traversalProof.source}</span></div>}<div className="chat-followups"><span className="tiny-label">NEXT QUESTIONS FROM THIS SKILL</span>{answer.followUpQuestions?.map((followUp: string) => <button key={followUp} onClick={() => { setQuestion(followUp); ask(followUp); }}>{followUp}<ChevronRight size={12} /></button>)}</div></div>}</div>;
 }
 
 function AiAdminPanel({ onRun }: { onRun: (label: string) => void }) {

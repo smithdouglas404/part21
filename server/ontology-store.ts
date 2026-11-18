@@ -1,5 +1,5 @@
 import { Pool } from "pg";
-import { ontologyMappings, part21Ontology, temporalRecords } from "../shared/ontology";
+import { part21Ontology } from "../shared/ontology";
 
 const connectionString = process.env.POSTGRES_URL;
 const pool = connectionString ? new Pool({ connectionString, max: 5 }) : null;
@@ -13,7 +13,7 @@ const schemaStatements = [
 
 export async function ontologyStorageStatus() {
   if (!pool) {
-    return { mode: "synthetic-fallback", configured: false, provider: "PostgreSQL", requiredEnv: "POSTGRES_URL", schema: "part21-assurance-ontology", reason: "No PostgreSQL connection configured; reads use deterministic shared demo data." };
+    return { mode: "not-configured", configured: false, provider: "PostgreSQL", requiredEnv: "POSTGRES_URL", schema: "part21-assurance-ontology", reason: "PostgreSQL ontology persistence is not configured; no ontology data is available from this adapter." };
   }
   try {
     const result = await pool.query<{ now: string }>("SELECT NOW() AS now");
@@ -24,13 +24,7 @@ export async function ontologyStorageStatus() {
 }
 
 export async function syncOntologySnapshot() {
-  if (!pool) return { ...(await ontologyStorageStatus()), insertedEntities: 0, insertedTemporalEvents: 0 };
+  if (!pool) throw new Error("POSTGRES_URL is required; ontology synchronization cannot use fixture data.");
   for (const statement of schemaStatements) await pool.query(statement);
-  for (const mapping of ontologyMappings) {
-    await pool.query(`INSERT INTO ontology_entities (id, ontology_class, source_id, properties) VALUES ($1, $2, $3, $4::jsonb) ON CONFLICT (id) DO UPDATE SET ontology_class = EXCLUDED.ontology_class, source_id = EXCLUDED.source_id, properties = EXCLUDED.properties, updated_at = NOW()`, [mapping.id, mapping.class, mapping.source, JSON.stringify(mapping.properties)]);
-  }
-  for (const record of temporalRecords) {
-    await pool.query(`INSERT INTO temporal_events (entity_id, entity_class, valid_from, valid_to, recorded_at, recorded_by, operation, payload) VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb)`, [record.entityId, record.entityClass, record.validFrom, record.validTo ?? null, record.recordedAt, record.recordedBy, record.operation, JSON.stringify(record.payload)]);
-  }
-  return { ...(await ontologyStorageStatus()), ontologyVersion: part21Ontology.version, insertedEntities: ontologyMappings.length, insertedTemporalEvents: temporalRecords.length };
+  return { ...(await ontologyStorageStatus()), ontologyVersion: part21Ontology.version, insertedEntities: 0, insertedTemporalEvents: 0, note: "Ontology records must be ingested from configured client systems; no fixture synchronization is performed." };
 }

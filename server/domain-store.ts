@@ -39,7 +39,8 @@ export async function listDomainRecords<T extends Record<string, unknown>>(recor
   return rows.map((row) => (typeof row.payload === "string" ? JSON.parse(row.payload) : row.payload) as T);
 }
 
-export async function getDomainPortfolio(auditId = "AUD-026") {
+export async function getDomainPortfolio(auditId?: string) {
+  if (!auditId) throw new Error("auditId is required; select an audit from the database.");
   await ensureDomainStore();
   const [audit, auditFindings, auditEvidence, auditControls, auditSources, auditMetrics, suppliers, changes] = await Promise.all([
     getDomainRecord("audit", auditId), listDomainRecords("finding", auditId), listDomainRecords("evidence", auditId), listDomainRecords("control", auditId), listDomainRecords("source", auditId), getDomainRecord("metric", auditId), listDomainRecords("supplier", auditId), listDomainRecords("change", auditId),
