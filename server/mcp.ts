@@ -7,6 +7,7 @@ import { runWeeklySourceSync } from "./weekly-sync";
 import { getGroundedGraphContext } from "./graph-store";
 import { getDomainPortfolio, upsertDomainRecord } from "./domain-store";
 import { attachKanbanAsset, createKanbanItem, listKanbanItems, moveKanbanItem } from "./kanban-store";
+import { buildLiveAuditBriefAgent, runFindingIntakeDialogue } from "./ai";
 
 export async function getMcpManifest() {
   const configuredConnectors = await listControlledConfigurationPayloads<any>("connector");
@@ -124,10 +125,46 @@ export async function callMcpTool(name: string, args: Record<string, unknown> = 
       return await approveWorkbookImport(String(args.workbookId ?? ""), String(args.actor ?? "MCP caller"), String(args.note ?? "Approved after human review"));
     case "run_weekly_source_sync":
       return runWeeklySourceSync(String(args.actor ?? "MCP scheduler"));
-    case "field_kanban_list":
-      return listKanbanItems(String(args.auditId ?? ""));
+    case "field_kanban_list": {
+      const auditId = String(args.auditId ?? "");
+      const kanban = await listKanbanItems(auditId);
+      const portfolio = await getDomainPortfolio(auditId);
+      const findings = portfolio.findings as any[];
+      const findingsById = new Map(findings.map((finding) => [String(finding.id), finding]));
+      const attachmentsById = new Map((kanban.attachments as any[]).map((attachment) => [String(attachment.id), attachment]));
+      const items = (kanban.items as any[]).map((item) => {
+        const linkedFinding = item.findingId ? findingsById.get(String(item.findingId)) ?? null : null;
+        const attachments = (item.attachmentIds ?? []).map((id: string) => attachmentsById.get(String(id))).filter(Boolean);
+        const hasSpecificDescription = typeof item.description === "string" && item.description.trim().length >= 20;
+        const traceabilityStatus = linkedFinding ? "confirmed_finding_link" : (item.productId || item.sourceRecordId ? "explicit_source_reference" : "unlinked_observation");
+        return {
+          ...item,
+          linkedFinding,
+          attachments,
+          traceability: { status: traceabilityStatus, confirmed: Boolean(linkedFinding || item.productId || item.sourceRecordId), findingId: item.findingId ?? null, productId: item.productId ?? null, sourceRecordId: item.sourceRecordId ?? null },
+          evidenceQuality: { descriptionSpecific: hasSpecificDescription, attachmentCount: attachments.length, status: hasSpecificDescription || attachments.length ? "reviewable" : "insufficient_detail" },
+          factBoundary: linkedFinding ? "This finding link is stored on the Kanban record." : "No confirmed finding or source-record link is stored; do not infer one from title similarity."
+        };
+      });
+      return {
+        ...kanban,
+        items,
+        traceabilitySummary: {
+          confirmedLinks: items.filter((item: any) => item.traceability.confirmed).length,
+          unlinkedObservations: items.filter((item: any) => item.traceability.status === "unlinked_observation").length,
+          insufficientDetail: items.filter((item: any) => item.evidenceQuality.status === "insufficient_detail").length,
+          availableFindingIds: findings.map((finding) => finding.id),
+          factBoundary: "Only explicit findingId, productId, sourceRecordId, descriptions, and attachment records are facts. Similar titles are hypotheses and are not returned as confirmed relationships."
+        },
+        source: "mysql-domain-records-plus-audit-portfolio"
+      };
+    }
+    case "audit_brief_agent":
+      return buildLiveAuditBriefAgent(String(args.auditId ?? ""), String(args.question ?? "Give me a complete fact-based audit brief."));
+    case "agent_intake":
+      return runFindingIntakeDialogue({ auditId: String(args.auditId ?? ""), message: String(args.message ?? ""), conversationId: args.conversationId ? String(args.conversationId) : undefined, finalize: args.finalize === true, draftTitle: args.draftTitle ? String(args.draftTitle) : undefined, draftDescription: args.draftDescription ? String(args.draftDescription) : undefined, severity: args.severity ? String(args.severity) : undefined, actor: args.actor ? String(args.actor) : undefined });
     case "field_kanban_create":
-      return createKanbanItem({ auditId: String(args.auditId ?? ""), title: String(args.title ?? ""), description: String(args.description ?? ""), status: (args.status as any) ?? "backlog", priority: (args.priority as any) ?? "medium", attention: true, source: "field", ownerPersonId: args.ownerPersonId ? String(args.ownerPersonId) : undefined, createdBy: String(args.createdBy ?? "Muse field operator") });
+      return createKanbanItem({ auditId: String(args.auditId ?? ""), title: String(args.title ?? ""), description: String(args.description ?? ""), status: (args.status as any) ?? "backlog", priority: (args.priority as any) ?? "medium", attention: true, source: "field", ownerPersonId: args.ownerPersonId ? String(args.ownerPersonId) : undefined, findingId: args.findingId ? String(args.findingId) : undefined, productId: args.productId ? String(args.productId) : undefined, sourceRecordId: args.sourceRecordId ? String(args.sourceRecordId) : undefined, observedAt: args.observedAt ? String(args.observedAt) : undefined, createdBy: String(args.createdBy ?? "Muse field operator") });
     case "field_kanban_move":
       return moveKanbanItem(String(args.itemId ?? ""), String(args.status ?? "backlog") as any, String(args.actor ?? "Muse field operator"));
     case "field_kanban_attach":

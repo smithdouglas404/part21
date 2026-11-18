@@ -56,6 +56,7 @@
 - [x] **Implement the Studio-compatible Part 21 gateway** — merge the live Studio OpenAPI with collision-free `/api/v1/part21/*` Kanban, audit, workbook, and generic tool paths; preserve bearer headers; proxy unmatched Studio API calls; and keep write operations human-gated with HTTP 202 previews.
 - [x] **Deploy the gateway as a non-destructive sidecar** — publish a combined gateway at `https://part21ops-l6crvfht.manus.space` that proxies Socra at `studio.innume.com`, validates the incoming bearer token through Socra's `my_access` operation, and adds the Part 21 routes without changing Socra.
 - [ ] **Refresh the existing Meta Muse connector schema** — keep one connector, change its OpenAPI address to the published sidecar, enter the newly created Socra `Part 21 Gateway` token, and verify that Socra and Part 21 tools are both visible.
+- [x] **Add Muse-to-agent dialogue** — persist user and agent turns in MySQL, route intake through controlled Finding Challenge and Evidence Intake skills, read the graph without mutating it, invoke the grounded LLM, and require confirmation before persisting a finding draft for qualified review.
 
 - [ ] **Promote workbook overlays into authoritative client graph entities** — add qualified ontology mapping, row-level identity resolution, relationship rules, and client approval before promotion.
 - [ ] **Move from demo-grounded chat to an approved provider runtime** — add provider adapter, model/prompt registry, evaluation set, guardrails, and production secret management.

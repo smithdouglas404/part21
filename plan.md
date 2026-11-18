@@ -14,6 +14,7 @@ A traceable operational assurance cockpit for nuclear quality teams: connect req
 - Express endpoints at `/api/mcp` and `/mcp` backed by database and graph services, plus the REST/OpenAPI connector for Meta Muse.
 - Excel revision intake, evidence/document control, report approval, field Kanban, AgentKit, ECC skill routing, and bitemporal graph projections.
 - Studio gateway mode that combines the existing Studio OpenAPI with Part 21 routes under `/api/v1/part21` without operation-id collisions.
+- Muse-to-Part-21-agent dialogue at `/api/v1/part21/agent/dialogue`: every user/agent turn is persisted in MySQL, governed skills are selected and returned with their question contracts, graph traversal is read-only during intake, and finding drafts remain blocked from authoritative graph projection until qualified approval.
 
 ## Architecture
 - React + TypeScript + Vite frontend with database-backed query state and audit-scoped projections.
@@ -21,6 +22,7 @@ A traceable operational assurance cockpit for nuclear quality teams: connect req
 - Express JSON endpoints in `server/_core/index.ts` backed by `server/mcp.ts`, graph services, document control, workbook adapters, AgentKit, and the connector gateway.
 - Existing authentication and tRPC foundation remain intact for later production integration.
 - No compliance verdict is automated; agent outputs are framed as recommendations, signal detection, and evidence-navigation support.
+- Conversational agent boundary: Muse carries the conversation, the Part 21 agent retrieves relational and graph context and invokes the grounded LLM, MySQL stores the dialogue and draft state, and the authoritative graph is updated only at the qualified report/finding approval gate.
 
 ## Design movement
 Three candidate directions:

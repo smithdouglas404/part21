@@ -2,9 +2,10 @@
 import type { AuditSkill } from "../shared/skills";
 import { invokeLLM } from "./_core/llm";
 import { getGroundedGraphContext } from "./graph-store";
-import { getDomainPortfolio } from "./domain-store";
+import { getDomainPortfolio, getDomainRecord, upsertDomainRecord } from "./domain-store";
 import { appendAssuranceEvent } from "./event-store";
 import { getControlledConfiguration, listControlledConfigurationPayloads } from "./config-store";
+import { listKanbanItems } from "./kanban-store";
 
 const sandboxEnvironmentProvider: "openai" | "anthropic" | null = process.env.OPENAI_API_KEY ? "openai" : process.env.ANTHROPIC_API_KEY ? "anthropic" : null;
 let configuredProvider: "openai" | "anthropic" | null = null;
@@ -82,6 +83,93 @@ export async function answerLiveGroundedQuestion(question: string, auditId?: str
   const warning = { id: `WARN-${Date.now()}`, traceId, code: "PART21-REPORTABILITY-REVIEW", severity: "high", title: "Potential Part 21 reportability concern", detail: "The grounded graph contains an unresolved traceability condition. Do not issue a final reportability or notification conclusion without qualified human review.", basis: ["21.21", "21.51", "21.61", grounded.grounding.findingId, ...graphContext.sourceIds.slice(0, 3)], acknowledgmentRequired: true };
   await appendAssuranceEvent({ type: "compliance_warning_issued", actor: "Compliance Agent", auditId: grounded.activeAuditId, entityId: warning.id, payload: { warning, question, model: response.model || "managed-runtime", graphSource: graphContext.source, graphCounts: { nodes: graphContext.nodes.length, edges: graphContext.edges.length, temporalEvents: graphContext.temporalEvents.length }, evidence: contextPacket.sourceIds } });
   return { ...grounded, answer: content, followUpQuestions: followUps.length ? followUps : grounded.followUpQuestions.slice(0, 2), provider: "managed live demo LLM", model: response.model || "claude-haiku-4-5", llmInvoked: true, groundedContextPacket: contextPacket, usage: response.usage, invocationMode: "live grounded model invocation", humanReviewRequired: true, traceId, warning };
+}
+
+export async function buildLiveAuditBriefAgent(auditId: string, question = "Give me a complete fact-based audit brief.") {
+  if (!auditId) throw new Error("auditId is required for an agent audit brief.");
+  const portfolio = await getDomainPortfolio(auditId);
+  const kanban = await listKanbanItems(auditId);
+  const findings = portfolio.findings as any[];
+  const graphComponents = await Promise.all(findings.map(async (finding) => {
+    try {
+      const graph = await getGroundedGraphContext(String(finding.id));
+      return { findingId: finding.id, status: "grounded", nodes: graph.nodes, edges: graph.edges, temporalEvents: graph.temporalEvents, sourceIds: graph.sourceIds, traversalProof: graph.traversalProof };
+    } catch (error) {
+      return { findingId: finding.id, status: "not_graph_grounded", error: error instanceof Error ? error.message : "Graph context unavailable", nodes: [], edges: [], temporalEvents: [], sourceIds: [] };
+    }
+  }));
+  const contextPacket = {
+    audit: portfolio.audit, metrics: portfolio.metrics, findings, evidence: portfolio.evidence, controls: portfolio.controls,
+    sources: portfolio.sources, suppliers: portfolio.suppliers, changes: portfolio.changes, kanban: kanban.items, graphComponents,
+    source: "mysql-domain-records-and-mysql-knowledge-graph",
+    factBoundary: "Only fields present in this packet are facts. Do not resolve unlinked Kanban notes by title similarity. State missing links, missing evidence, and graph-grounding failures explicitly. Do not invent dates, people, records, causes, or regulatory conclusions.",
+  };
+  const response = await invokeLLM({
+    model: "claude-haiku-4-5", maxTokens: 1200,
+    messages: [
+      { role: "system", content: "You are the Part 21 compliance brief agent. Use only the supplied database and graph context packet. Write a concise but complete narrative with headings: Verified facts, Kanban and field observations, Graph and genealogy, Evidence gaps, Recommended next questions. If a Kanban item has no explicit findingId, productId, sourceRecordId, or attachment, say it is unlinked and do not infer its meaning. Distinguish facts from hypotheses. Never issue a final legal, reportability, NRC notification, or compliance verdict." },
+      { role: "user", content: `${question}\n\nGrounded audit context packet:\n${JSON.stringify(contextPacket, null, 2)}` },
+    ],
+  });
+  const answer = typeof response.choices?.[0]?.message?.content === "string" ? response.choices[0].message.content : "The grounded model returned no narrative.";
+  const traceId = `TRACE-AUDIT-BRIEF-${Date.now()}`;
+  await appendAssuranceEvent({ type: "audit_brief_agent_invoked", actor: "Compliance Agent", auditId, entityId: traceId, payload: { question, model: response.model || "managed-runtime", findingCount: findings.length, graphGroundedCount: graphComponents.filter((item) => item.status === "grounded").length, graphUnresolvedCount: graphComponents.filter((item) => item.status !== "grounded").length, kanbanCount: kanban.items.length, source: contextPacket.source } });
+  return { answer, auditId, traceId, provider: "managed live demo LLM", model: response.model || "claude-haiku-4-5", llmInvoked: true, grounding: { source: contextPacket.source, findingCount: findings.length, graphGroundedCount: graphComponents.filter((item) => item.status === "grounded").length, graphUnresolvedCount: graphComponents.filter((item) => item.status !== "grounded").length, kanbanCount: kanban.items.length, graphComponents, factBoundary: contextPacket.factBoundary }, humanReviewRequired: true };
+}
+
+export async function runFindingIntakeDialogue(input: { auditId: string; message: string; conversationId?: string; finalize?: boolean; draftTitle?: string; draftDescription?: string; severity?: string; actor?: string }) {
+  if (!input.auditId || !input.message) throw new Error("auditId and message are required for agent intake.");
+  const actor = input.actor || "Muse field operator";
+  const conversationId = input.conversationId || `AGENT-${Date.now()}`;
+  const existing = await getDomainRecord<any>("agent_conversation", conversationId);
+  const turns = Array.isArray(existing?.turns) ? existing.turns : [];
+  turns.push({ role: "user", actor, text: input.message, createdAt: new Date().toISOString() });
+  const portfolio = await getDomainPortfolio(input.auditId);
+  const kanban = await listKanbanItems(input.auditId);
+  const configuredSkills = (await listControlledConfigurationPayloads<AuditSkill>("skill")).map((row) => row.payload).filter((skill) => skill && typeof skill === "object" && "id" in skill && "route" in skill) as AuditSkill[];
+  if (!configuredSkills.length) throw new Error("No active dialogue skills are available in the controlled configuration repository.");
+  const normalizedMessage = input.message.toLowerCase();
+  const desiredSkillIds = normalizedMessage.includes("finding") || normalizedMessage.includes("observed") || normalizedMessage.includes("nonconform")
+    ? ["finding-challenge", "evidence-intake"]
+    : normalizedMessage.includes("product") || normalizedMessage.includes("lot") || normalizedMessage.includes("heat") || normalizedMessage.includes("serial") || normalizedMessage.includes("trace")
+      ? ["trace-chain", "evidence-intake"]
+      : ["frame-scope", "evidence-intake"];
+  const appliedSkills = desiredSkillIds.map((id) => configuredSkills.find((skill) => skill.id === id)).filter(Boolean) as AuditSkill[];
+  const graphComponents = await Promise.all((portfolio.findings as any[]).map(async (finding) => {
+    try {
+      const graph = await getGroundedGraphContext(String(finding.id));
+      return { findingId: finding.id, status: "grounded", nodes: graph.nodes, edges: graph.edges, temporalEvents: graph.temporalEvents, sourceIds: graph.sourceIds, traversalProof: graph.traversalProof };
+    } catch (error) {
+      return { findingId: finding.id, status: "not_graph_grounded", error: error instanceof Error ? error.message : "Graph context unavailable", nodes: [], edges: [], temporalEvents: [], sourceIds: [] };
+    }
+  }));
+  const contextPacket = {
+    audit: portfolio.audit, findings: portfolio.findings, evidence: portfolio.evidence, controls: portfolio.controls,
+    sources: portfolio.sources, suppliers: portfolio.suppliers, changes: portfolio.changes, kanban: kanban.items, graphComponents,
+    conversationTurns: turns, appliedSkills: appliedSkills.map((skill) => ({ id: skill.id, name: skill.name, phase: skill.phase, route: skill.route, purpose: skill.purpose, skillContract: skill.skillContract, questions: skill.questions, humanGate: skill.humanGate, completionSignal: skill.completionSignal })), source: "mysql-domain-records-and-read-only-mysql-knowledge-graph",
+    factBoundary: "Use only supplied records. Interim conversation does not update the graph. Never infer a finding, person, date, affected record, or cause from a similar title.",
+  };
+  if (!input.finalize) {
+    const response = await invokeLLM({
+      model: "claude-haiku-4-5", maxTokens: 900,
+      messages: [
+        { role: "system", content: "You are the conversational Part 21 intake agent. Muse is the user-facing assistant and you are the internal compliance agent. Apply the supplied active skills and their question contracts. Read the conversation and database/graph context. Respond with a short narrative, then ask no more than three specific follow-up questions needed to define the new audit finding. Use existing graph relationships only as context and label them as context. Do not write the graph during intake. Do not invent missing facts. End with 'Ready for qualified review' only when the user has supplied enough detail; otherwise ask questions. Name the active skill(s) used in the response." },
+        { role: "user", content: `New field communication:\n${input.message}\n\nGrounded context packet:\n${JSON.stringify(contextPacket, null, 2)}` },
+      ],
+    });
+    const answer = typeof response.choices?.[0]?.message?.content === "string" ? response.choices[0].message.content : "I need more detail before I can frame this as a finding.";
+    turns.push({ role: "agent", actor: "Part 21 Compliance Agent", text: answer, model: response.model || "managed-runtime", createdAt: new Date().toISOString() });
+    await upsertDomainRecord({ recordType: "agent_conversation", recordId: conversationId, auditId: input.auditId, payload: { id: conversationId, auditId: input.auditId, status: "awaiting_user", turns, graphWrite: "blocked_until_qualified_approval", updatedAt: new Date().toISOString() } });
+    await appendAssuranceEvent({ type: "agent_dialogue_turn_recorded", actor: "Part 21 Compliance Agent", auditId: input.auditId, entityId: conversationId, payload: { userActor: actor, turnCount: turns.length, graphWrite: "not_performed", model: response.model || "managed-runtime" } });
+    return { conversationId, auditId: input.auditId, answer, awaitingUser: true, llmInvoked: true, provider: "managed live demo LLM", model: response.model || "claude-haiku-4-5", skillsApplied: appliedSkills.map((skill) => ({ id: skill.id, name: skill.name, phase: skill.phase, route: skill.route, skillContract: skill.skillContract, humanGate: skill.humanGate })), grounding: { source: contextPacket.source, graphReadOnly: true, graphGroundedFindings: graphComponents.filter((item) => item.status === "grounded").map((item) => item.findingId), ungroundedFindings: graphComponents.filter((item) => item.status !== "grounded").map((item) => item.findingId), factBoundary: contextPacket.factBoundary }, traceability: { turnsStored: turns.length, recordType: "agent_conversation", graphProjection: "not performed" } };
+  }
+  if (!input.draftTitle || !input.draftDescription || input.draftDescription.trim().length < 20) throw new Error("draftTitle and a specific draftDescription of at least 20 characters are required before qualified review.");
+  const draftId = `F-DRAFT-${Date.now()}`;
+  await upsertDomainRecord({ recordType: "finding_draft", recordId: draftId, auditId: input.auditId, payload: { id: draftId, auditId: input.auditId, title: input.draftTitle, description: input.draftDescription, severity: input.severity ?? "Review required", status: "Draft", sourceConversationId: conversationId, graphProjection: "blocked_until_qualified_report_approval", createdBy: actor, createdAt: new Date().toISOString() } });
+  turns.push({ role: "system", actor: "Part 21 Compliance Agent", text: `Draft ${draftId} persisted for qualified review; graph projection was not performed.`, createdAt: new Date().toISOString() });
+  await upsertDomainRecord({ recordType: "agent_conversation", recordId: conversationId, auditId: input.auditId, payload: { id: conversationId, auditId: input.auditId, status: "awaiting_qualified_review", turns, graphWrite: "blocked_until_qualified_approval", updatedAt: new Date().toISOString() } });
+  await appendAssuranceEvent({ type: "finding_draft_created_from_agent_dialogue", actor, auditId: input.auditId, entityId: draftId, payload: { conversationId, graphProjection: "not_performed", status: "Draft" } });
+  return { conversationId, auditId: input.auditId, draftId, status: "awaiting_qualified_review", graphProjection: "not_performed", message: "The finding draft and dialogue are stored in MySQL. A qualified reviewer must approve before an authoritative finding or graph projection is created.", traceability: { turnsStored: turns.length, sourceConversationId: conversationId } };
 }
 
 export async function acknowledgeComplianceWarning(input: { warningId: string; traceId?: string; actor: string; rationale: string; auditId?: string }) {

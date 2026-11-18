@@ -3,7 +3,7 @@ import { appendAssuranceEvent } from "./event-store";
 import { listDomainRecords, upsertDomainRecord } from "./domain-store";
 
 export type KanbanStatus = "backlog" | "in_progress" | "blocked" | "review" | "final";
-export type KanbanItem = { id: string; auditId: string; title: string; description: string; status: KanbanStatus; priority: "low" | "medium" | "high" | "critical"; attention: boolean; source: "field" | "agent" | "audit"; ownerPersonId?: string; createdBy: string; createdAt: string; updatedAt: string; attachmentIds: string[] };
+export type KanbanItem = { id: string; auditId: string; title: string; description: string; status: KanbanStatus; priority: "low" | "medium" | "high" | "critical"; attention: boolean; source: "field" | "agent" | "audit"; ownerPersonId?: string; findingId?: string; productId?: string; sourceRecordId?: string; observedAt?: string; createdBy: string; createdAt: string; updatedAt: string; attachmentIds: string[] };
 export type KanbanAttachment = { id: string; itemId: string; auditId: string; filename: string; mediaType: string; kind: "photo" | "document" | "voice"; sizeBytes: number; sha256: string; transcript?: string; createdBy: string; createdAt: string };
 
 export async function listKanbanItems(auditId: string) {
@@ -15,7 +15,7 @@ export async function listKanbanItems(auditId: string) {
 export async function createKanbanItem(input: Partial<KanbanItem> & { auditId: string; createdBy: string }) {
   if (!input.auditId || !input.title) throw new Error("auditId and title are required.");
   const now = new Date().toISOString();
-  const item: KanbanItem = { id: input.id ?? `KB-${Date.now()}`, auditId: input.auditId, title: input.title, description: input.description ?? "", status: input.status ?? "backlog", priority: input.priority ?? "medium", attention: input.attention ?? true, source: input.source ?? "field", ownerPersonId: input.ownerPersonId, createdBy: input.createdBy, createdAt: now, updatedAt: now, attachmentIds: input.attachmentIds ?? [] };
+  const item: KanbanItem = { id: input.id ?? `KB-${Date.now()}`, auditId: input.auditId, title: input.title, description: input.description ?? "", status: input.status ?? "backlog", priority: input.priority ?? "medium", attention: input.attention ?? true, source: input.source ?? "field", ownerPersonId: input.ownerPersonId, findingId: input.findingId, productId: input.productId, sourceRecordId: input.sourceRecordId, observedAt: input.observedAt, createdBy: input.createdBy, createdAt: now, updatedAt: now, attachmentIds: input.attachmentIds ?? [] };
   await upsertDomainRecord({ recordType: "kanban_item", recordId: item.id, auditId: item.auditId, payload: item });
   const event = await appendAssuranceEvent({ type: "kanban_item_created", actor: item.createdBy, auditId: item.auditId, entityId: item.id, payload: { status: item.status, priority: item.priority, source: item.source } });
   return { ok: true, item, event, source: "mysql-domain-records" };

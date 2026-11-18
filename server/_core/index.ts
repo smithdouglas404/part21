@@ -119,6 +119,8 @@ async function startServer() {
   app.post("/api/v1/part21/field/kanban/move", async (req, res) => respondToConnectedTool(req, res, "field_kanban_move"));
   app.post("/api/v1/part21/field/kanban/attach", async (req, res) => respondToConnectedTool(req, res, "field_kanban_attach"));
   app.post("/api/v1/part21/audit/brief", async (req, res) => respondToConnectedTool(req, res, "check_audit_readiness"));
+  app.post("/api/v1/part21/audit/brief-agent", async (req, res) => respondToConnectedTool(req, res, "audit_brief_agent"));
+  app.post("/api/v1/part21/agent/dialogue", async (req, res) => respondToConnectedTool(req, res, "agent_intake"));
   app.post("/api/v1/part21/excel/list-workbooks", async (req, res) => respondToConnectedTool(req, res, "excel_list_workbooks"));
   app.post("/api/v1/part21/excel/import", async (req, res) => respondToConnectedTool(req, res, "excel_import_workbook"));
   app.post("/api/v1/part21/excel/compare", async (req, res) => respondToConnectedTool(req, res, "excel_compare_revision"));
