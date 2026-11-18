@@ -289,3 +289,43 @@ export async function part21ProcessReference(calendar?: Partial<DeclaredCalendar
     ],
   };
 }
+
+/** Skill contracts that govern each statutory branch. The agent uses these to ask the right question at the right clock. */
+export const PART21_BRANCH_SKILLS: Record<string, string[]> = {
+  evaluation: ["part21-deviation-screening", "part21-discovery-clock"],
+  "interim-report": ["part21-discovery-clock", "part21-notification"],
+  "officer-notification": ["part21-substantial-safety-hazard", "part21-notification"],
+  "supplier-notification": ["supplier-evaluation-transfer", "part21-notification"],
+  "nrc-initial": ["part21-notification"],
+  "nrc-written": ["part21-notification"],
+};
+const AGENT_READ_PRINCIPAL: AssurancePrincipal = { id: "grounded-agent-read", actor: "Grounded agent (read-only)", roleIds: [], isAdmin: false, qualified: false, access: "look_only", auditIds: [], auditWriteIds: [], qualifiedAuditIds: [] };
+/**
+ * Computes the live Part 21 clock state for an audit so the agent reasons over real branches
+ * instead of inventing deadlines. Read-only: it starts no clock and writes nothing.
+ */
+export async function part21ClockBrief(auditId: string, calendar: Partial<DeclaredCalendar> = {}) {
+  if (!auditId.trim()) throw new Error("An explicit auditId is required to compute Part 21 clocks.");
+  const principal = { ...AGENT_READ_PRINCIPAL, auditIds: [auditId] };
+  const records = await listPart21Cases(auditId, principal);
+  const cases = [];
+  for (const record of records) {
+    const view = await getPart21Case(auditId, String(record.caseId), principal, calendar);
+    const pending = view.gates.filter(gate => gate.state !== "recorded");
+    cases.push({
+      caseId: view.caseId, title: view.title, findingId: view.findingId ?? null, closed: Boolean(view.closed),
+      branches: view.branches.map(branch => ({ id: branch.id, label: branch.label, citation: branch.citation, status: branch.status, triggerAt: branch.triggerAt, dueAt: branch.dueAt, daysRemaining: branch.daysRemaining, gateId: branch.gateId, skillIds: PART21_BRANCH_SKILLS[branch.id] ?? [] })),
+      nextGate: pending[0] ? { id: pending[0].id, label: pending[0].label, citation: pending[0].citation, question: pending[0].question, prohibits: pending[0].prohibits } : null,
+      pendingGateIds: pending.map(gate => gate.id),
+      overdueBranches: view.branches.filter(branch => branch.status === "overdue").map(branch => branch.id),
+      dueSoonBranches: view.branches.filter(branch => branch.status === "due_soon").map(branch => branch.id),
+    });
+  }
+  return {
+    auditId, source: "mysql-database", generatedAt: new Date().toISOString(), calendarApproval: "not-approved-for-reliance",
+    cases,
+    instruction: cases.length
+      ? "State the next open gate, its citation, due date and days remaining from these computed values only. Ask the specific question that closes that gate. Never compute, extend or restart a statutory clock yourself."
+      : "No Part 21 case is open in this audit. No clock is running. Do not imply that one is; offer to open a case from a recorded discovery fact.",
+  };
+}
