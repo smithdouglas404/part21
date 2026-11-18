@@ -33,7 +33,7 @@ import { getDomainPortfolio, getDomainStoreStatus, listAudits } from "../domain-
 import { getConfigurationStoreStatus, getControlledConfiguration, listControlledConfigurations } from "../config-store";
 import { getMergedStudioOpenApi, getStudioGatewayStatus, studioProxyMiddleware } from "../studio-gateway";
 import { resolveRequestPrincipal, AssuranceAccessError } from "../access-control";
-import { createPart21CaseRecord, getPart21Case, listPart21Cases, part21ProcessReference, recordPart21Fact } from "../part21-case";
+import { createPart21CaseRecord, getPart21Case, listPart21Cases, part21ClockBrief, part21ProcessReference, recordPart21Fact } from "../part21-case";
 import { listDomainRecords } from "../domain-store";
 import { verifyProcessCitations, verifyProcessModelCoverage } from "../part21-citation-verify";
 import { listSourceSnapshots, getRegulatorySnapshot } from "../regulatory-source";
@@ -305,6 +305,12 @@ async function startServer() {
         humanReviewRequired: true,
       });
     } catch (error) { res.status(503).json({ ok: false, error: error instanceof Error ? error.message : "Nuclear status unavailable" }); }
+  });
+  app.get("/api/part21/agent-brief", async (req, res) => {
+    try {
+      const auditId = String(req.query.auditId ?? "");
+      res.json(await part21ClockBrief(auditId, calendarFrom(req)));
+    } catch (error) { res.status(409).json({ ok: false, error: error instanceof Error ? error.message : "Agent clock brief unavailable" }); }
   });
   app.get("/api/part21/process", async (req, res) => res.json(await part21ProcessReference(calendarFrom(req))));
   app.get("/api/part21/cases", async (req, res) => withPrincipal(req, res, async () => { const auditId = String(req.query.auditId ?? ""); const principal = await principalOrReadOnly(req, auditId); return listPart21Cases(auditId, principal); }));
