@@ -36,8 +36,12 @@ async function probe(path: string, method: string, note?: string): Promise<Resul
     // Consume the body so a streamed HTML error page cannot be mistaken for success.
     const body = await response.text();
     const parseable = (() => { try { JSON.parse(body); return true; } catch { return false; } })();
-    const ok = contentType.includes("application/json") && (body.trim() === "" || parseable);
-    return { path, method, status, contentType, ok, note: note ?? (ok ? undefined : "not JSON") };
+    const isJson = contentType.includes("application/json") && (body.trim() === "" || parseable);
+    // Paths beneath /api/v1 are forwarded to the Studio upstream, which owns their error format.
+    // What must never happen there is the single-page-app shell: HTML where an API was called.
+    const upstreamOwned = path.startsWith("/api/v1/") && !path.includes("/part21/");
+    const ok = upstreamOwned ? !contentType.includes("text/html") : isJson;
+    return { path, method, status, contentType, ok, note: note ?? (ok ? undefined : upstreamOwned ? "upstream answered with HTML" : "not JSON") };
   } catch (error) {
     return { path, method, status, contentType, ok: false, note: `request failed: ${(error as Error).message}` };
   }
@@ -96,6 +100,7 @@ async function probe(path: string, method: string, note?: string): Promise<Resul
     for (const failure of failures) console.log(`  ${failure.method} ${failure.path} → ${failure.status} ${failure.contentType || "no content type"} | ${failure.note}`);
     process.exit(1);
   }
-  console.log(`\nPASS: all ${results.length} probes returned JSON. No route fell through to the SPA shell.`);
+  const upstream = results.filter(r => r.path.startsWith("/api/v1/") && !r.path.includes("/part21/") && !r.contentType.includes("application/json")).length;
+  console.log(`\nPASS: ${results.length} probes, none returned the SPA shell. ${results.length - upstream} answered JSON; ${upstream} upstream-owned /api/v1 error(s) used the Studio format.`);
   process.exit(0);
 })();
