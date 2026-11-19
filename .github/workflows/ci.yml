@@ -1,0 +1,64 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: Types, tests and build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: TypeScript
+        run: pnpm check
+
+      # The suite is hermetic: it runs without DATABASE_URL and fails closed if a test
+      # silently depends on a live database.
+      - name: Tests
+        run: pnpm test
+        env:
+          NODE_ENV: test
+
+      - name: Build
+        run: pnpm build
+
+  secret-scan:
+    name: Credential scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      # Fails the build if a real-looking credential is committed. Placeholders such as
+      # YOUR_API_KEY_HERE are permitted so vendored examples still install.
+      - name: Scan tracked files for credentials
+        run: |
+          set -euo pipefail
+          pattern='(mysql://[^"'"'"' ]+:[^"'"'"' ]+@[^"'"'"' ]+|postgres(ql)?://[^"'"'"' ]+:[^"'"'"' ]+@[^"'"'"' ]+|sk-[A-Za-z0-9]{24,}|ghp_[A-Za-z0-9]{30,}|-----BEGIN (RSA |EC |OPENSSH )?PRIVATE KEY-----)'
+          if git grep -nIE "$pattern" -- . ':!pnpm-lock.yaml' ':!vendor' > /tmp/hits.txt; then
+            if grep -viE 'localhost|127\.0\.0\.1|test-only\.invalid|example\.com|YOUR_|placeholder|redacted' /tmp/hits.txt > /tmp/real.txt; then
+              echo "Potential credentials committed:"
+              cat /tmp/real.txt
+              exit 1
+            fi
+          fi
+          echo "No committed credentials detected."

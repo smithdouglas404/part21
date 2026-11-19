@@ -1,0 +1,63 @@
+Part 21 Assurance OS
+Copyright (c) 2026 The Part 21 Assurance OS Authors
+Licensed under the MIT License. See LICENSE.
+
+This product includes software and content developed by third parties.
+The notices below are provided for attribution and provenance.
+
+-------------------------------------------------------------------------------
+Everything Claude Code (ECC)
+  Location:  vendor/ecc
+  Copyright: 2026 Affaan Mustafa
+  License:   MIT (see vendor/ecc/LICENSE)
+  Note:      Vendored skill library and MCP configuration examples. The MIT
+             copyright notice in vendor/ecc/LICENSE must be retained in any
+             redistribution. References inside vendored configuration files to
+             external services (for example placeholder API keys) are examples
+             and grant no rights to those services.
+
+-------------------------------------------------------------------------------
+Temporal SDKs
+  Packages:  @temporalio/client, @temporalio/worker, @temporalio/workflow
+  License:   MIT
+  Note:      Used for durable workflow definitions and the deadline supervisor.
+             The Temporal server itself is a separate program under its own
+             license and is not distributed in this repository.
+
+-------------------------------------------------------------------------------
+Web platform
+  React, React DOM, Express, Drizzle ORM, Vite, Tailwind CSS, shadcn/ui,
+  Radix UI, Framer Motion, Zod, Luxon, Vitest.
+  Licenses:  MIT / Apache-2.0 / ISC as declared by each project.
+  Note:      See pnpm-lock.yaml and each package's own license text. Any
+             redistribution should be accompanied by an SBOM generated from
+             that lockfile.
+
+-------------------------------------------------------------------------------
+Regulatory source content
+  Source:    Electronic Code of the Federal Register (eCFR), National Archives
+             and Records Administration; U.S. Nuclear Regulatory Commission.
+  Content:   10 CFR Part 21 and 10 CFR Part 50 Appendix B provisions, plus
+             retained original response bytes.
+  Status:    U.S. Government works are not subject to copyright in the United
+             States (17 U.S.C. Sec. 105). The eCFR is an unofficial compilation;
+             the official regulations are published in the Federal Register and
+             the Code of Federal Regulations. Ingested snapshots carry their
+             own source date and must be re-ingested when the regulation changes.
+
+-------------------------------------------------------------------------------
+Regulatory guidance referenced but not ingested
+  RG 1.164 (commercial-grade dedication) and 10 CFR 50.7 are cited by skill
+  contracts and declared as external references. They are not distributed here
+  and are not represented as incorporated requirements.
+
+-------------------------------------------------------------------------------
+Blockchain demonstration
+  The completion hash feature is a synthetic demonstration modelled on Hedera.
+  No Hedera network, account, or consensus service is used or implied.
+
+-------------------------------------------------------------------------------
+No endorsement
+  Nothing in this repository is approved, endorsed, or qualified by the U.S.
+  Nuclear Regulatory Commission or any other regulator. See the disclaimer in
+  README.md.
