@@ -379,6 +379,15 @@ async function startServer() {
   if (process.env.NODE_ENV === "development") {
     await setupVite(app, server);
   } else {
+    // An unknown API path must never fall through to the SPA shell: a client asking for JSON
+    // would receive HTML and report a misleading "misrouted endpoint" failure.
+    app.use("/api", (req, res) => {
+      res.status(404).json({
+        ok: false,
+        error: `Unknown API route: ${req.method} ${req.originalUrl.split("?")[0]}`,
+        hint: "Check the path against /api/v1/openapi.json; this server answers JSON for every /api route.",
+      });
+    });
     serveStatic(app);
   }
 

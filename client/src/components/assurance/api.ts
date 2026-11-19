@@ -71,8 +71,18 @@ export async function request<T = any>(
   try {
     result = text ? JSON.parse(text) : null;
   } catch {
+    const looksHtml = /^\s*<(!doctype|html)/i.test(text.slice(0, 200));
+    if (response.status === 401 || response.status === 403 || looksHtml) {
+      window.dispatchEvent(new Event("assurance-session-expired"));
+      throw new ApiError(
+        looksHtml
+          ? `${path} answered with an HTML page instead of JSON. That means the request did not reach the API — usually a stale session or the wrong host. Reload and sign in again.`
+          : `${path} was refused (${response.status}). Sign in again to continue.`,
+        response.status
+      );
+    }
     throw new ApiError(
-      `Expected JSON from ${path}; received an unavailable or misrouted endpoint.`,
+      `Expected JSON from ${path}; the server returned ${response.status} ${response.headers.get("content-type") ?? "without a content type"}.`,
       response.status
     );
   }
