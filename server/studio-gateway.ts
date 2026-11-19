@@ -148,12 +148,24 @@ async function forwardToStudio(req: Request, res: Response) {
   const target = new URL(req.originalUrl, upstreamBaseUrl.endsWith("/") ? upstreamBaseUrl : `${upstreamBaseUrl}/`);
   const body = req.body && ["POST", "PUT", "PATCH", "DELETE"].includes(req.method) ? JSON.stringify(req.body) : undefined;
   const response = await fetch(target, { method: req.method, headers: copyRequestHeaders(req), body });
-  res.status(response.status);
-  const contentType = response.headers.get("content-type");
-  if (contentType) res.setHeader("content-type", contentType);
+  const contentType = response.headers.get("content-type") ?? "";
+  const bytes = Buffer.from(await response.arrayBuffer());
   const requestId = response.headers.get("x-request-id");
   if (requestId) res.setHeader("x-request-id", requestId);
-  res.send(Buffer.from(await response.arrayBuffer()));
+  // An upstream error must not reach a JSON client as an opaque binary body. Successful payloads
+  // are passed through untouched; only non-JSON error responses are re-expressed as JSON.
+  if (response.status >= 400 && !contentType.includes("application/json")) {
+    res.status(response.status).json({
+      ok: false,
+      error: `Studio upstream rejected ${req.method} ${req.originalUrl.split("?")[0]} with ${response.status}.`,
+      upstreamStatus: response.status,
+      upstreamContentType: contentType || "none",
+    });
+    return true;
+  }
+  res.status(response.status);
+  if (contentType) res.setHeader("content-type", contentType);
+  res.send(bytes);
   return true;
 }
 

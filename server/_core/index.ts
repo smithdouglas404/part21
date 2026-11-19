@@ -32,7 +32,8 @@ import { getGroundedGraphContext, getGraphStoreStatus, validateGraphOntology } f
 import { getDomainPortfolio, getDomainStoreStatus, listAudits } from "../domain-store";
 import { getConfigurationStoreStatus, getControlledConfiguration, listControlledConfigurations, listControlledConfigurationPayloads } from "../config-store";
 import { getMergedStudioOpenApi, getStudioGatewayStatus, studioProxyMiddleware } from "../studio-gateway";
-import { resolveRequestPrincipal, AssuranceAccessError } from "../access-control";
+import { resolveRequestPrincipal, AssuranceAccessError, runAsPrincipal, currentPrincipal, assertAuditPermission } from "../access-control";
+import { configureEvidenceRuntime as configureVaultRuntime } from "../evidence-vault";
 import { supervisePart21Case, supervisionStatus, temporalIsConfigured } from "../part21-supervision";
 import { deleteUserConnector, getMuseSettings, getUserConnectorStatus, museReadiness, setMuseSettings, setUserConnector } from "../muse-settings";
 import { createPart21CaseRecord, getPart21Case, listPart21Cases, part21ClockBrief, part21ProcessReference, recordPart21Fact } from "../part21-case";
@@ -88,6 +89,35 @@ async function startServer() {
   app.use(express.json({ limit: "50mb" }));
   app.use(express.urlencoded({ limit: "50mb", extended: true }));
   app.get("/api/health", (_req, res) => res.json({ status: "ok" }));
+  // Every request runs inside a principal context so downstream services (the evidence vault,
+  // the Kanban, the graph) can authorize the caller without each route re-deriving identity.
+  app.use((req, res, next) => {
+    const run = async () => {
+      let principal: any;
+      try { principal = await principalOrReadOnly(req, ""); }
+      catch { return next(); }
+      // The visitor may read the demonstration estate but never write. Scope is derived from the
+      // audits that actually exist, so a look-only principal can traverse what the UI lists.
+      if (principal.id === "read-only-visitor") {
+        try { principal = { ...principal, auditIds: (await listAudits()).map((audit: any) => audit.id) }; }
+        catch { /* leave scope empty if the audit list is unavailable */ }
+      }
+      (req as any).assurancePrincipal = principal;
+      return runAsPrincipal(principal, () => next());
+    };
+    run().catch(() => next());
+  });
+
+  // The evidence runtime is a hard dependency of the Kanban and the document vault. It is
+  // configured once at startup; authorization is evaluated per request against the live
+  // principal, so a look-only visitor can read but never write.
+  configureVaultRuntime({
+    authorize: async (principal: any, auditId: string, action: any) => {
+      assertAuditPermission(principal, auditId, action !== "read");
+    },
+    resolvePrincipal: async () => currentPrincipal(),
+  });
+
   app.get("/api/domain/status", async (_req, res) => res.json(await getDomainStoreStatus()));
   app.get("/api/domain/audits", async (_req, res) => res.json({ source: "mysql-database", audits: await listAudits() }));
   app.get("/api/domain/portfolio", async (req, res) => res.json(await getDomainPortfolio(typeof req.query.auditId === "string" ? req.query.auditId : "")));
