@@ -195,11 +195,26 @@ async function startServer() {
   app.post("/api/reports/finalize", async (req, res) => { try { res.json(await finalizeAuditReport(String(req.body?.auditId ?? ""), String(req.body?.actor ?? "Qualified report approver"), String(req.body?.auditorNarrative ?? ""), req.body?.approved === true)); } catch (error) { res.status(409).json({ ok: false, error: error instanceof Error ? error.message : "Report finalization blocked", authoritativeGraphWrite: false }); } });
   app.get("/api/people", async (req, res) => res.json(await listAssurancePeople(typeof req.query.roleId === "string" ? req.query.roleId : undefined)));
   app.get("/api/approval-rules", async (req, res) => res.json({ source: "mysql-domain-records", rules: await listApprovalRules(typeof req.query.decisionType === "string" ? req.query.decisionType as any : undefined) }));
-  app.get("/api/kanban", async (req, res) => res.json(await listKanbanItems(String(req.query.auditId ?? ""))));
-  app.post("/api/kanban/items", async (req, res) => res.json(await createKanbanItem(req.body ?? {})));
-  app.post("/api/kanban/items/:itemId/move", async (req, res) => res.json(await moveKanbanItem(req.params.itemId, req.body?.status, String(req.body?.actor ?? "Field operator"))));
-  app.post("/api/kanban/items/:itemId/attachments", async (req, res) => res.json(await attachKanbanAsset({ ...(req.body ?? {}), itemId: req.params.itemId })));
-  app.post("/api/kanban/items/:itemId/communications", async (req, res) => res.json(await appendKanbanCommunication({ ...(req.body ?? {}), itemId: req.params.itemId, auditId: String(req.body?.auditId ?? ""), conversationId: String(req.body?.conversationId ?? `KANBAN-${req.params.itemId}`), role: req.body?.role === "agent" || req.body?.role === "system" ? req.body.role : "user", actor: String(req.body?.actor ?? "Field operator"), text: String(req.body?.text ?? ""), skillIds: Array.isArray(req.body?.skillIds) ? req.body.skillIds.map(String) : [] })));
+  /**
+   * Express 4 does not forward rejected promises to error middleware, so an async handler that
+   * throws would become an unhandled rejection and terminate the process. Every route that can
+   * fail at runtime is wrapped here and answers JSON.
+   */
+  const jsonRoute = (handler: (req: any, res: any) => Promise<unknown>) => async (req: any, res: any) => {
+    try { await handler(req, res); }
+    catch (error) {
+      if (res.headersSent) return;
+      const message = error instanceof Error ? error.message : "Request failed";
+      const unavailable = /not configured|unavailable|not available/i.test(message);
+      res.status(unavailable ? 503 : 500).json({ ok: false, error: message });
+    }
+  };
+
+  app.get("/api/kanban", jsonRoute(async (req: any, res: any) => res.json(await listKanbanItems(String(req.query.auditId ?? "")))));
+  app.post("/api/kanban/items", jsonRoute(async (req: any, res: any) => res.json(await createKanbanItem(req.body ?? {}))));
+  app.post("/api/kanban/items/:itemId/move", jsonRoute(async (req: any, res: any) => res.json(await moveKanbanItem(req.params.itemId, req.body?.status, String(req.body?.actor ?? "Field operator")))));
+  app.post("/api/kanban/items/:itemId/attachments", jsonRoute(async (req: any, res: any) => res.json(await attachKanbanAsset({ ...(req.body ?? {}), itemId: req.params.itemId }))));
+  app.post("/api/kanban/items/:itemId/communications", jsonRoute(async (req: any, res: any) => res.json(await appendKanbanCommunication({ ...(req.body ?? {}), itemId: req.params.itemId, auditId: String(req.body?.auditId ?? ""), conversationId: String(req.body?.conversationId ?? `KANBAN-${req.params.itemId}`), role: req.body?.role === "agent" || req.body?.role === "system" ? req.body.role : "user", actor: String(req.body?.actor ?? "Field operator"), text: String(req.body?.text ?? ""), skillIds: Array.isArray(req.body?.skillIds) ? req.body.skillIds.map(String) : [] }))));
   app.post("/api/reports/:auditId/approval-route", async (req, res) => { try { res.json(await routeFinalReportApproval(req.params.auditId, String(req.body?.personaId ?? ""), String(req.body?.routedBy ?? "Audit workflow"), String(req.body?.note ?? "Final report requires qualified human disposition."), { id: String(req.body?.personId ?? ""), name: String(req.body?.personName ?? ""), email: String(req.body?.personEmail ?? "") })); } catch (error) { res.status(409).json({ ok: false, error: error instanceof Error ? error.message : "Report routing failed" }); } });
   app.get("/api/reports/approvals", async (req, res) => res.json(await listReportApprovalTasks(typeof req.query.auditId === "string" ? req.query.auditId : undefined)));
   app.post("/api/reports/approvals/:approvalId/approve", async (req, res) => { try { res.json(await approveRoutedFinalReport(req.params.approvalId, String(req.body?.actor ?? ""), String(req.body?.note ?? ""))); } catch (error) { res.status(409).json({ ok: false, error: error instanceof Error ? error.message : "Report approval failed", authoritativeGraphWrite: false }); } });
@@ -379,9 +394,16 @@ async function startServer() {
   if (process.env.NODE_ENV === "development") {
     await setupVite(app, server);
   } else {
+    // Last-resort error middleware: never answer an API request with an HTML stack trace.
+    app.use((error: any, req: any, res: any, _next: any) => {
+      if (res.headersSent) return;
+      const message = error instanceof Error ? error.message : "Unexpected server error";
+      console.error(`[api] ${req.method} ${req.originalUrl} failed: ${message}`);
+      res.status(500).json({ ok: false, error: message });
+    });
     // An unknown API path must never fall through to the SPA shell: a client asking for JSON
     // would receive HTML and report a misleading "misrouted endpoint" failure.
-    app.use("/api", (req, res) => {
+    app.use(["/api", "/mcp"], (req, res) => {
       res.status(404).json({
         ok: false,
         error: `Unknown API route: ${req.method} ${req.originalUrl.split("?")[0]}`,
@@ -396,5 +418,14 @@ async function startServer() {
   server.on("error", error => { console.error("Server failed:", error.message); process.exit(1); });
   server.listen(port, "0.0.0.0", () => console.log(`Server listening on port ${port}`));
 }
+
+// A single failing request must not terminate the assurance service. Log it, keep serving,
+// and let the JSON error middleware answer the caller.
+process.on("unhandledRejection", reason => {
+  console.error("[process] unhandled rejection:", reason instanceof Error ? reason.message : reason);
+});
+process.on("uncaughtException", error => {
+  console.error("[process] uncaught exception:", error instanceof Error ? error.message : error);
+});
 
 startServer().catch(error => { console.error(error); process.exit(1); });
