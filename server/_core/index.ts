@@ -181,6 +181,26 @@ async function startServer() {
   app.post("/api/v1/part21/excel/compare", async (req, res) => respondToConnectedTool(req, res, "excel_compare_revision"));
   app.post("/api/v1/part21/excel/approve", async (req, res) => respondToConnectedTool(req, res, "excel_approve_import"));
   app.post("/api/v1/part21/tools/:tool", async (req, res) => respondToConnectedTool(req, res, req.params.tool));
+  // The published connector contract advertises these paths without the /part21 segment.
+  // They must be answered locally before the upstream proxy claims the /api/v1 namespace,
+  // otherwise a Muse call reaches the Studio and returns its 404 instead of a Part 21 result.
+  const connectorAliases: Array<[string, string]> = [
+    ["/api/v1/field/kanban/list", "field_kanban_list"],
+    ["/api/v1/field/kanban/create", "field_kanban_create"],
+    ["/api/v1/field/kanban/move", "field_kanban_move"],
+    ["/api/v1/field/kanban/attach", "field_kanban_attach"],
+    ["/api/v1/audit/brief", "check_audit_readiness"],
+    ["/api/v1/audit/brief-agent", "audit_brief_agent"],
+    ["/api/v1/agent/dialogue", "agent_intake"],
+    ["/api/v1/excel/list-workbooks", "excel_list_workbooks"],
+    ["/api/v1/excel/import", "excel_import_workbook"],
+    ["/api/v1/excel/compare", "excel_compare_revision"],
+    ["/api/v1/excel/approve", "excel_approve_revision"],
+  ];
+  for (const [path, tool] of connectorAliases) {
+    app.post(path, async (req, res) => respondToConnectedTool(req, res, tool));
+  }
+
   app.use("/api/v1", studioProxyMiddleware);
   app.get("/mcp", (_req, res) => res.json({ name: "part21-assurance-os", endpoint: "/mcp", transport: "Streamable HTTP", protocol: "MCP JSON-RPC 2.0", instructions: "POST initialize, tools/list, tools/call, resources/list, or resources/read requests to this endpoint." }));
   app.post("/mcp", async (req, res) => {
