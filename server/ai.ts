@@ -1,3 +1,4 @@
+import { citationsForPacket, regulatoryExcerptsFor } from "./regulatory-context";
 import { part21ClockBrief } from "./part21-case";
 import { createAgentServices, requireAgentScope, type AgentServices, type AgentScope, type AgentPrincipal, type AgentConversation, type AgentRecord, type GovernedSkill } from "./agent-runtime";
 import { runAuditSkill, previewAuditSkill, prepareFindingDraftSnapshot, type AuditSkillInput } from "./agentkit";
@@ -32,13 +33,19 @@ export async function answerGroundedQuestion(question: string, auditId?: string,
   return { ...run, question, answer: run.graph ? run.recommendation : "Audit portfolio questions only. Graph provider unavailable or unlinked; no graph traversal or recommendation is claimed.", appliedSkill: run.skillId, skillInvocation: run.appliedSkill, activeAuditId: input.auditId, provider: "provider not invoked", model: null, llmInvoked: false, invocationMode: "read-only skill preview", groundedContextPacket: buildLlmGroundingPacket(run) };
 }
 async function invokeGrounded(run: Awaited<ReturnType<typeof previewAuditSkill>>, question: string, services: AgentServices, communicationContext?: AgentRecord) {
-  const packet = { ...buildLlmGroundingPacket(run), ...(communicationContext ? { communicationContext, ...(communicationContext.part21Clocks ? { part21Clocks: communicationContext.part21Clocks } : {}) } : {}) };
+  const skillForCitations = (run as any)?.skillContract && typeof (run as any).skillContract === "object" ? (run as any).skillContract : null;
+  const regulatoryExcerpts = await regulatoryExcerptsFor(citationsForPacket({ clockBrief: communicationContext?.part21Clocks ?? null, skill: skillForCitations })).catch(() => []);
+  const packet = {
+    ...buildLlmGroundingPacket(run),
+    ...(communicationContext ? { communicationContext, ...(communicationContext.part21Clocks ? { part21Clocks: communicationContext.part21Clocks } : {}) } : {}),
+    ...(regulatoryExcerpts.length ? { regulatoryExcerpts } : {}),
+  };
   if (!run.graph) return { ...run, answer: "Audit portfolio questions only. No audit-scoped graph traversal is available; provider not invoked and no recommendation issued.", provider: "provider not invoked", model: null, llmInvoked: false, groundedContextPacket: packet };
   const requestedModel = process.env.PART21_LLM_MODEL || "claude-haiku-4-5";
   const call = { id: services.id(), sequence: run.toolCalls.length + 1, tool: "llm.invokeLLM", arguments: { requestedModel, auditId: run.auditId, findingId: run.findingId, packet }, status: "completed" as "completed" | "unknown", result: {} as AgentRecord, sourceIds: run.sourceIds, startedAt: services.now(), completedAt: "" };
   try {
     const response = await services.invoke({ model: requestedModel, maxTokens: 1200, messages: [
-      { role: "system", content: "You are a nuclear assurance recommendation assistant, not a regulatory decision maker. Use only the supplied audited database/tool packet. Preserve the applied skill ID, revision and draft/active status. Ask the unanswered required questions individually. Label missing evidence unknown. Never invent facts, legal clocks, approvals, supplier substitutions, affected record counts, or compliance conclusions. Candidate draft guidance has no regulatory approval. When the packet contains part21Clocks, report the next open gate with its citation, due date and days remaining exactly as computed, and ask the one question needed to close that gate. Never compute, extend or restart a statutory clock yourself. Return concise source-linked guidance with human review required." },
+      { role: "system", content: "You are a nuclear assurance recommendation assistant, not a regulatory decision maker. Use only the supplied audited database/tool packet. Preserve the applied skill ID, revision and draft/active status. Ask the unanswered required questions individually. Label missing evidence unknown. Never invent facts, legal clocks, approvals, supplier substitutions, affected record counts, or compliance conclusions. Candidate draft guidance has no regulatory approval. When the packet contains part21Clocks, report the next open gate with its citation, due date and days remaining exactly as computed, and ask the one question needed to close that gate. Never compute, extend or restart a statutory clock yourself. When the packet contains regulatoryExcerpts, you may quote that text verbatim and must attribute it to the cited provision and snapshot date; quoted regulation is not a finding, an interpretation or a decision. Return concise source-linked guidance with human review required." },
       { role: "user", content: `${question}\n\nAudit-scoped grounding packet:\n${JSON.stringify(packet)}` },
     ] });
     if ((response as any).error) throw new Error(String((response as any).error.message ?? "Provider returned an error"));

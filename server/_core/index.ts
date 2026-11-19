@@ -34,6 +34,9 @@ import { getConfigurationStoreStatus, getControlledConfiguration, listControlled
 import { getMergedStudioOpenApi, getStudioGatewayStatus, studioProxyMiddleware } from "../studio-gateway";
 import { resolveRequestPrincipal, AssuranceAccessError, runAsPrincipal, currentPrincipal, assertAuditPermission } from "../access-control";
 import { configureEvidenceRuntime as configureVaultRuntime } from "../evidence-vault";
+import { resolveCitations } from "../citation-resolver";
+import { regulatoryGraphStatus } from "../regulatory-graph";
+import { nuclearPart21Skills } from "../../shared/nuclear-skills";
 import { supervisePart21Case, supervisionStatus, temporalIsConfigured } from "../part21-supervision";
 import { deleteUserConnector, getMuseSettings, getUserConnectorStatus, museReadiness, setMuseSettings, setUserConnector } from "../muse-settings";
 import { createPart21CaseRecord, getPart21Case, listPart21Cases, part21ClockBrief, part21ProcessReference, recordPart21Fact } from "../part21-case";
@@ -396,6 +399,44 @@ async function startServer() {
       return { ...view, supervision }; }));
   app.post("/api/part21/cases", async (req, res) => withPrincipal(req, res, async getPrincipal => createPart21CaseRecord(req.body ?? {}, await getPrincipal())));
   app.post("/api/part21/cases/:caseId/facts", async (req, res) => withPrincipal(req, res, async getPrincipal => recordPart21Fact({ ...(req.body ?? {}), auditId: String(req.body?.auditId ?? req.query.auditId ?? ""), caseId: req.params.caseId }, await getPrincipal())));
+  app.get("/api/regulatory/coverage", async (_req, res) => {
+    const snapshots = [...(await listSourceSnapshots("ecfr-part-21")), ...(await listSourceSnapshots("ecfr-part-50-appendix-b"))];
+    const skills = nuclearPart21Skills.map(skill => ({
+      skillId: skill.id,
+      name: skill.name,
+      domain: (skill as any).domain ?? null,
+      coverage: resolveCitations((skill as any).regulatoryRefs ?? [], snapshots, (skill as any).externalRefs ?? []),
+    }));
+    const totals = skills.reduce((acc, item) => ({
+      references: acc.references + item.coverage.total,
+      resolved: acc.resolved + item.coverage.resolved,
+      external: acc.external + item.coverage.notApplicable,
+      unresolved: acc.unresolved + item.coverage.unresolved + item.coverage.ambiguous,
+    }), { references: 0, resolved: 0, external: 0, unresolved: 0 });
+    res.json({
+      snapshots: snapshots.map(snapshot => ({ id: snapshot.id, sourceId: snapshot.sourceId, sourceAsOf: snapshot.sourceAsOf, provisions: snapshot.provisions.length })),
+      totals,
+      accountedPercent: totals.references ? Math.round(((totals.resolved + totals.external) / totals.references) * 100) : 0,
+      skills,
+      humanReviewRequired: true,
+    });
+  });
+
+  app.get("/api/regulatory/graph-status", async (_req, res) => {
+    const [rows] = await (await import("../db-pool")).query(
+      "SELECT * FROM part21_controlled_configuration WHERE kind='ontology' AND status='active'",
+    );
+    const row = (rows as any[])[0];
+    if (!row) return res.status(503).json({ ok: false, error: "No active ontology is configured." });
+    const payload = typeof row.payload === "string" ? JSON.parse(row.payload) : row.payload;
+    const ontology: any = { kind: "ontology", configId: row.config_id, version: row.version, status: row.status, payload };
+    const [drafts] = await (await import("../db-pool")).query(
+      "SELECT version, status FROM part21_controlled_configuration WHERE kind='ontology' AND config_id=? AND status='draft'",
+      [row.config_id],
+    );
+    res.json({ ...regulatoryGraphStatus(ontology), stagedRevisions: drafts, humanReviewRequired: true });
+  });
+
   app.get("/api/regulatory/snapshots", async (_req, res) => {
     try {
       const part21 = await listSourceSnapshots("ecfr-part-21");

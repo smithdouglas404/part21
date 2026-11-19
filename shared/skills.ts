@@ -22,6 +22,8 @@ export interface AuditSkill {
   questions: AuditQuestion[];
   completionSignal: string;
   regulatoryRefs?: string[];
+  /** References cited by the skill that are deliberately outside the ingested regulatory set. */
+  externalRefs?: { reference: string; basis: string }[];
   domain?: "part21" | "appendix-b" | "nuclear-overlay";
   requiredEvidence?: string[];
   definitionStatus?: "draft_candidate";

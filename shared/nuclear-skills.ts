@@ -147,6 +147,7 @@ export const nuclearPart21Skills: AuditSkill[] = [
     skillContract: "P21-NUCLEAR-CGD-07",
     humanGate: "Qualified dedication engineer and quality organization accept the dedication package.",
     regulatoryRefs: ["10 CFR 21.21(c)", "10 CFR 50 Appendix B Criterion VII", "10 CFR 50 Appendix B Criterion VIII", "RG 1.164"],
+    externalRefs: [{ reference: "RG 1.164", basis: "NRC regulatory guide; guidance rather than regulation, not ingested as a provision set." }],
     domain: "appendix-b",
     requiredEvidence: ["dedication-package", "critical-characteristics", "acceptance-method", "receipt-inspection", "approved-supplier"],
     questions: [
@@ -227,6 +228,7 @@ export const nuclearPart21Skills: AuditSkill[] = [
     skillContract: "P21-NUCLEAR-POSTINGS-11",
     humanGate: "Site quality or compliance owner confirms location coverage and current controlled content.",
     regulatoryRefs: ["10 CFR 21.5", "10 CFR 21.6", "10 CFR 50.7"],
+    externalRefs: [{ reference: "10 CFR 50.7", basis: "10 CFR 50.7 is outside the ingested Part 21 and Appendix B snapshots; ingestion is tracked as a backlog item." }],
     domain: "part21",
     requiredEvidence: ["posting-inventory", "location-verification", "current-procedure", "responsible-contact"],
     questions: [
