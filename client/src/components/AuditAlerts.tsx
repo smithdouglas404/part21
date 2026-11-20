@@ -34,6 +34,7 @@ export default function AuditAlerts({ auditId }: { auditId: string }) {
   const [busy, setBusy] = useState<string | null>(null);
   const [rationale, setRationale] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [hook, setHook] = useState<{ configured: boolean; host: string | null; delivered: number; lastError: string | null }>({ configured: false, host: null, delivered: 0, lastError: null });
 
   const load = useCallback(async () => {
     if (!auditId) return;
@@ -43,6 +44,17 @@ export default function AuditAlerts({ auditId }: { auditId: string }) {
       if (!response.ok) throw new Error(body?.error ?? "Unable to load alerts");
       setAlerts(Array.isArray(body.alerts) ? body.alerts : []);
       setError(null);
+      const hookResponse = await fetch(`/api/alerts/webhook/status?auditId=${encodeURIComponent(auditId)}`);
+      if (hookResponse.ok) {
+        const hookBody = await hookResponse.json();
+        const deliveries = Array.isArray(hookBody.deliveries) ? hookBody.deliveries : [];
+        setHook({
+          configured: Boolean(hookBody.configured),
+          host: hookBody.host ?? null,
+          delivered: deliveries.filter((item: any) => item.ok && item.statusCode).length,
+          lastError: deliveries.find((item: any) => !item.ok)?.error ?? null,
+        });
+      }
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Unable to load alerts");
     }
@@ -112,6 +124,10 @@ export default function AuditAlerts({ auditId }: { auditId: string }) {
           </div>
 
           {error && <p className="mb-2 text-xs text-red-500">{error}</p>}
+          <p className="mb-2 text-[11px] text-muted-foreground">
+            Notifications: {hook.configured ? `signed webhook to ${hook.host}` : "no webhook configured"} · {hook.delivered} delivered
+            {hook.lastError ? ` · last failure: ${hook.lastError}` : ""}
+          </p>
           {!alerts.length && <p className="text-sm text-muted-foreground">No alerts have been raised for this audit. The engine evaluates findings, evidence, changes and precedent coverage.</p>}
 
           <div className="space-y-3">

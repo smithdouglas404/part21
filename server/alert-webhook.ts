@@ -130,9 +130,9 @@ export async function deliverAlertWebhook(input: { alert: AuditAlert; force?: bo
     return skipped;
   }
   if (!input.force && await alreadyDelivered(alert.id)) {
-    const skipped: AlertDelivery = { deliveryId: id, alertId: alert.id, auditId: alert.auditId, severity: alert.severity, url, attempt, ok: true, statusCode: null, signature: "", requestSha256: "", responseExcerpt: null, error: "Already delivered successfully; suppressed as a duplicate.", durationMs: 0, attemptedAt };
-    await record(skipped);
-    return skipped;
+    // Suppression is not an attempt: recording it would inflate the delivery history every time
+    // an agent re-evaluates the same open alert.
+    return { deliveryId: id, alertId: alert.id, auditId: alert.auditId, severity: alert.severity, url, attempt, ok: true, statusCode: null, signature: "", requestSha256: "", responseExcerpt: null, error: "Already delivered successfully; suppressed as a duplicate.", durationMs: 0, attemptedAt };
   }
   const timestamp = String(Math.floor(Date.now() / 1000));
   const body = JSON.stringify({
@@ -169,6 +169,9 @@ export async function deliverAlertWebhook(input: { alert: AuditAlert; force?: bo
 
 /** Called after alerts are persisted. Never throws: a failed notification must not lose the alert. */
 export async function dispatchAuditAlerts(alerts: AuditAlert[]): Promise<AlertDelivery[]> {
+  // An unconfigured installation should not fill the delivery table with identical failures on
+  // every agent run; a manual notify still records the precise reason.
+  if (!webhookConfiguration().configured) return [];
   const candidates = alerts.filter(notificationCandidate);
   const results: AlertDelivery[] = [];
   for (const alert of candidates) {

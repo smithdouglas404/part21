@@ -153,7 +153,17 @@ export async function persistAuditAlerts(alerts: AuditAlert[]): Promise<{ insert
     const [rows] = await pool().query<any[]>("SELECT payload FROM part21_domain_records WHERE record_type='warning' AND record_id=?", [alert.id]);
     if ((rows as any[]).length) {
       const current = parsed((rows as any[])[0].payload);
-      if (current.status === "acknowledged") { existing++; continue; }
+      if (current.status === "acknowledged") {
+        // The human decision is immutable, but the wording of the alert should still track the
+        // records it describes so an acknowledged alert is not left in stale prose.
+        const refreshed = { ...current, title: alert.title, severity: alert.severity, narrative: alert.narrative, sourceIds: alert.sourceIds, findingId: alert.findingId };
+        const payload = JSON.stringify(refreshed);
+        if (payload !== JSON.stringify(current)) {
+          await pool().query("UPDATE part21_domain_records SET payload=?, content_sha256=?, updated_at=NOW(3) WHERE record_type='warning' AND record_id=? AND audit_id=?", [payload, crypto.createHash("sha256").update(payload).digest("hex"), alert.id, alert.auditId]);
+        }
+        existing++;
+        continue;
+      }
       // Keep the alert text in step with the records it describes, but never resurrect a
       // human acknowledgement and never rewrite the original raise time.
       const refreshed = { ...alert, raisedAt: current.raisedAt ?? alert.raisedAt };
