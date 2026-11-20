@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import AuditAlerts from "@/components/AuditAlerts";
 import { LockKeyhole, RefreshCw } from "lucide-react";
 import { startLogin } from "@/const";
 import { trpc } from "@/lib/trpc";
@@ -125,6 +126,7 @@ function AuthenticatedHome({
           Sign out
         </button>
       </div>
+      {auditId && entered && <AuditAlerts auditId={auditId} />}
       <Launch
         principal={principal}
         audits={audits}
