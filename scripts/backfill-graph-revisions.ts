@@ -20,6 +20,7 @@ function parsed(value: unknown): any {
 }
 
 function auditOf(payload: Record<string, any>): string | null {
+  if (payload.sourceRecordType === "audit" && typeof payload.sourceRecordId === "string") return payload.sourceRecordId;
   return payload.sourceAuditId ?? payload.auditId ?? payload.audit_id ?? payload.scope?.auditId ?? null;
 }
 
