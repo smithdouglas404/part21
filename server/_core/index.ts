@@ -1,4 +1,5 @@
 import "dotenv/config";
+import { listAuditAlerts, raiseAuditAlerts, acknowledgeAuditAlert } from "../alerts";
 import express from "express";
 import type { Request, Response } from "express";
 import { createServer } from "http";
@@ -296,6 +297,23 @@ async function startServer() {
       catch (error) { return res.status(502).json({ ok: false, error: error instanceof Error ? error.message : "Live grounded LLM invocation failed", databaseGroundingRequired: true }); }
     }
     return res.json(await answerGroundedQuestion(question, auditId, findingId));
+  });
+  app.get("/api/alerts", async (req, res) => {
+    const auditId = String(req.query.auditId ?? "").trim();
+    if (!auditId) return res.status(400).json({ error: "auditId is required" });
+    res.json({ auditId, alerts: await listAuditAlerts(auditId) });
+  });
+  app.post("/api/alerts/raise", async (req, res) => {
+    const auditId = String(req.body?.auditId ?? "").trim();
+    if (!auditId) return res.status(400).json({ error: "auditId is required" });
+    res.json(await raiseAuditAlerts(auditId, req.body?.findingId ? String(req.body.findingId) : null));
+  });
+  app.post("/api/alerts/:alertId/acknowledge", async (req, res) => {
+    const auditId = String(req.body?.auditId ?? "").trim();
+    const actor = String(req.body?.actor ?? "").trim();
+    const rationale = String(req.body?.rationale ?? "").trim();
+    if (!auditId || !actor || !rationale) return res.status(400).json({ error: "auditId, actor and rationale are required" });
+    res.json(await acknowledgeAuditAlert({ auditId, alertId: req.params.alertId, actor, rationale }));
   });
   app.post("/api/ai/warnings/:warningId/acknowledge", async (req, res) => res.json(await acknowledgeComplianceWarning({ warningId: req.params.warningId, traceId: String(req.body?.traceId ?? ""), actor: String(req.body?.actor ?? ""), rationale: String(req.body?.rationale ?? "") })));
   app.post("/api/ai/config", (req, res) => res.json(configureAiProvider(req.body?.provider === "anthropic" ? "anthropic" : "openai", String(req.body?.key ?? ""))));

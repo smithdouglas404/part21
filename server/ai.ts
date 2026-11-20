@@ -1,5 +1,6 @@
 import { citationsForPacket, regulatoryExcerptsFor } from "./regulatory-context";
 import { buildPrecedentPacket } from "./precedent";
+import { raiseAuditAlerts } from "./alerts";
 import { part21ClockBrief } from "./part21-case";
 import { createAgentServices, requireAgentScope, type AgentServices, type AgentScope, type AgentPrincipal, type AgentConversation, type AgentRecord, type GovernedSkill } from "./agent-runtime";
 import { runAuditSkill, previewAuditSkill, prepareFindingDraftSnapshot, type AuditSkillInput } from "./agentkit";
@@ -74,7 +75,8 @@ async function invokeGrounded(run: Awaited<ReturnType<typeof previewAuditSkill>>
     call.result = { responseId: response.id ?? null, requestedModel, actualModel: response.model || null, usage: response.usage ?? null, answer: narrative, narrative: narrativeShape(narrative) };
     call.completedAt = services.now();
     if (run.durable) await services.recordTool(run.traceId, call);
-    const result = { ...run, toolCalls: [...run.toolCalls, call], question, answer: narrative, narrative: narrativeShape(narrative), precedentTraversal, provider: "managed-invokeLLM", model: response.model || null, requestedModel, modelIdentityStatus: response.model ? "response-reported" : "unknown", llmInvoked: true, invocationMode: "live grounded recommendation", groundedContextPacket: packet, usage: response.usage, warning: null, humanReviewRequired: true };
+    const raised = await raiseAuditAlerts(run.auditId, run.findingId ?? null).catch(() => null);
+    const result = { ...run, toolCalls: [...run.toolCalls, call], question, answer: narrative, narrative: narrativeShape(narrative), precedentTraversal, ...(raised ? { alerts: raised.alerts, alertPersist: { inserted: raised.inserted, existing: raised.existing } } : {}), provider: "managed-invokeLLM", model: response.model || null, requestedModel, modelIdentityStatus: response.model ? "response-reported" : "unknown", llmInvoked: true, invocationMode: "live grounded recommendation", groundedContextPacket: packet, usage: response.usage, warning: null, humanReviewRequired: true };
     if (run.durable) await services.finishRun(result);
     return result;
   } catch (error) {
