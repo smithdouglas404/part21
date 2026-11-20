@@ -53,4 +53,31 @@ describe("alert rules", () => {
     const input = { auditId: "AUD-026", now, findings: [{ id: "F-042", severity: "Major", status: "Open" }], evidence: [] };
     expect(deriveAlerts(input)[0].id).toBe(deriveAlerts(input)[0].id);
   });
+
+  it("writes every narrative as three professional paragraphs without bullets", () => {
+    const alerts = deriveAlerts({
+      auditId: "AUD-026", now,
+      findings: [{ id: "F-042", title: "Receiving inspection cannot resolve heat-lot chain", severity: "Major", status: "In remediation", owner: "M. Lee", age: 8 }],
+      evidence: [{ id: "EV-803", state: "Review due", confidence: 0.71, linkedTo: "F-042" }],
+      changes: [{ id: "CHG-2026-014", status: "Review", description: "Heat-lot substitution without approved inspection plan" }],
+      precedent: {
+        basis: "database: part21_domain_records",
+        scope: { auditId: "AUD-026", findingId: "F-042", terms: ["inspection"] },
+        comparableFindings: [], relatedAudits: [{ auditId: "AUD-008", auditTitle: "Field records and inspection evidence", findingCount: 0, matchedOn: ["audit title shares \"inspection\""], score: 2 }],
+        coverageGap: true,
+        coverageStatement: "No comparable finding exists in any other audit.",
+        limitations: [],
+      },
+    });
+    expect(alerts).toHaveLength(4);
+    for (const alert of alerts) {
+      const paragraphs = alert.narrative.split("\n\n").map(part => part.trim()).filter(Boolean);
+      expect(paragraphs.length, `${alert.code} paragraphs`).toBe(3);
+      for (const paragraph of paragraphs) {
+        expect(paragraph.endsWith("."), `${alert.code} paragraph ends with a full stop`).toBe(true);
+        expect(paragraph.startsWith("-") || paragraph.startsWith("*")).toBe(false);
+        expect(paragraph.length).toBeGreaterThan(40);
+      }
+    }
+  });
 });

@@ -1,5 +1,6 @@
 import "dotenv/config";
 import { listAuditAlerts, raiseAuditAlerts, acknowledgeAuditAlert } from "../alerts";
+import { deliverAlertWebhook, listAlertDeliveries, webhookConfiguration } from "../alert-webhook";
 import express from "express";
 import type { Request, Response } from "express";
 import { createServer } from "http";
@@ -314,6 +315,24 @@ async function startServer() {
     const rationale = String(req.body?.rationale ?? "").trim();
     if (!auditId || !actor || !rationale) return res.status(400).json({ error: "auditId, actor and rationale are required" });
     res.json(await acknowledgeAuditAlert({ auditId, alertId: req.params.alertId, actor, rationale }));
+  });
+  app.get("/api/alerts/webhook/status", async (req, res) => {
+    const auditId = String(req.query.auditId ?? "").trim();
+    res.json({ ...webhookConfiguration(), auditId: auditId || null, deliveries: auditId ? await listAlertDeliveries(auditId) : [] });
+  });
+  app.get("/api/alerts/deliveries", async (req, res) => {
+    const auditId = String(req.query.auditId ?? "").trim();
+    if (!auditId) return res.status(400).json({ error: "auditId is required" });
+    res.json({ auditId, deliveries: await listAlertDeliveries(auditId), configuration: webhookConfiguration() });
+  });
+  app.post("/api/alerts/:alertId/notify", async (req, res) => {
+    const auditId = String(req.body?.auditId ?? "").trim();
+    if (!auditId) return res.status(400).json({ error: "auditId is required" });
+    const alerts = await listAuditAlerts(auditId);
+    const alert = alerts.find(item => item.id === req.params.alertId);
+    if (!alert) return res.status(404).json({ error: "Alert does not exist in this audit." });
+    const delivery = await deliverAlertWebhook({ alert, force: Boolean(req.body?.force) });
+    res.status(delivery.ok ? 200 : 502).json({ alertId: alert.id, severity: alert.severity, delivery, configuration: webhookConfiguration() });
   });
   app.post("/api/ai/warnings/:warningId/acknowledge", async (req, res) => res.json(await acknowledgeComplianceWarning({ warningId: req.params.warningId, traceId: String(req.body?.traceId ?? ""), actor: String(req.body?.actor ?? ""), rationale: String(req.body?.rationale ?? "") })));
   app.post("/api/ai/config", (req, res) => res.json(configureAiProvider(req.body?.provider === "anthropic" ? "anthropic" : "openai", String(req.body?.key ?? ""))));

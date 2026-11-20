@@ -73,26 +73,37 @@ export function deriveAlerts(input: {
     const status = String(finding.status ?? "").toLowerCase();
     if (CLOSED.has(status)) continue;
     if (severity === "major" || severity === "critical") {
+      const age = typeof finding.age === "number" ? ` It has been open for ${finding.age} days.` : "";
+      const narrative = [
+        `Finding ${finding.id}, "${finding.title ?? "Major finding"}", is recorded in this audit as ${finding.severity} severity and currently stands at "${finding.status}", with ${finding.owner ?? "an unassigned owner"} as the accountable owner.${age}`,
+        `A finding at this severity is a recorded admission that a required control did not perform as specified, and the corrective-action expectation in 10 CFR Part 50 Appendix B is not satisfied while the record sits in an intermediate state with no verified action behind it. The uncertainty does not stay with the finding: any product, supplier or evidence record that depends on the failed control inherits the same unverified condition until the finding is closed on evidence.`,
+        `The record needs one of two decisions from its owner, captured against ${finding.id} itself. Either a dated corrective action with objective evidence attached and a named verifier, or a documented justification for reclassifying the finding with the technical basis stated. Whichever path is chosen, the decision, the evidence and the resulting graph revision must reference the same record so that the audit report can be defended line by line.`,
+      ].join("\n\n");
       alerts.push({
         id: alertId(input.auditId, "finding-open-major", String(finding.id)),
         auditId: input.auditId, code: "finding-open-major",
         severity: severity === "critical" ? "critical" : "high",
         title: `${finding.id}: ${finding.title ?? "Major finding"} remains open`,
-        narrative: `Finding ${finding.id} is recorded as ${finding.severity} severity and is currently ${finding.status}, owned by ${finding.owner ?? "an unassigned owner"}. A finding of this severity cannot be treated as closed while evidence, corrective action or an accountable decision is still outstanding, so the record needs an owner decision and a dated next action rather than remaining in its present state.`,
+        narrative,
         status: "open", findingId: String(finding.id), sourceIds: [input.auditId, String(finding.id)], raisedAt: now,
       });
     }
   }
 
   for (const item of input.evidence) {
-    const status = String(item.status ?? "").toLowerCase();
+    const status = String(item.status ?? item.state ?? "").toLowerCase();
     if (CLOSED.has(status)) continue;
     if (status.includes("review") || item.reviewDue === true) {
+      const narrative = [
+        `Evidence ${item.id}${item.title ? ` (${item.title})` : ""} is recorded as "${item.status ?? item.state}"${typeof item.confidence === "number" ? ` with a recorded confidence of ${item.confidence}` : ""}${item.linkedTo ? ` and is linked to ${item.linkedTo}` : ""}.`,
+        `Until a qualified reviewer records a disposition, every finding that relies on this item is supported by material that nobody has accepted, and the audit trail cannot distinguish a document that proves a point from one that merely mentions it. The review decision is what converts an uploaded file into evidence that can carry a finding.`,
+        `The reviewer should record one of three dispositions against ${item.id} with a short rationale and the review date: accepted as evidence, accepted with a stated limitation, or rejected with the reason. That disposition then becomes the link the finding and the report cite, rather than the raw upload.`,
+      ].join("\n\n");
       alerts.push({
         id: alertId(input.auditId, "evidence-review-due", String(item.id)),
         auditId: input.auditId, code: "evidence-review-due", severity: "medium",
         title: `${item.id} is awaiting review`,
-        narrative: `Evidence ${item.id}${item.title ? ` (${item.title})` : ""} is recorded as ${item.status}${typeof item.confidence === "number" ? ` with confidence ${item.confidence}` : ""}. Until a qualified reviewer records a disposition, any finding that relies on this item is supported by unverified material, so the review decision and its rationale must be captured before the finding advances.`,
+        narrative,
         status: "open", findingId: item.findingId ?? null, sourceIds: [input.auditId, String(item.id)], raisedAt: now,
       });
     }
@@ -101,22 +112,32 @@ export function deriveAlerts(input: {
   for (const change of input.changes ?? []) {
     const status = String(change.status ?? "").toLowerCase();
     if (status === "review" || status === "pending") {
+      const narrative = [
+        `Change ${change.id}${change.title ? ` (${change.title})` : change.description ? ` (${change.description})` : ""} is recorded as "${change.status}" and has not been approved.`,
+        `A configuration change that is being relied on before approval breaks the traceability chain this audit exists to test, because the as-built baseline no longer matches the approved design. It also removes the basis for any Part 21 evaluation of the change, since that evaluation has to start from an approved configuration rather than one still in motion.`,
+        `The change owner should either complete the approval and record the approver and date, or word the related finding so that it does not rely on the unapproved state. The choice and its rationale belong in the change record so that the graph, the finding and the report all describe the same configuration.`,
+      ].join("\n\n");
       alerts.push({
         id: alertId(input.auditId, "change-unapproved", String(change.id)),
         auditId: input.auditId, code: "change-unapproved", severity: "high",
         title: `${change.id} is still in review`,
-        narrative: `Change ${change.id}${change.title ? ` (${change.title})` : ""} is recorded as ${change.status} and has not been approved. A configuration change that is being relied on before approval breaks the traceability chain the audit is testing, so either the approval must be completed or the finding must be worded to exclude reliance on it.`,
+        narrative,
         status: "open", findingId: change.findingId ?? null, sourceIds: [input.auditId, String(change.id)], raisedAt: now,
       });
     }
   }
 
   if (input.precedent?.coverageGap) {
+    const narrative = [
+      input.precedent.coverageStatement,
+      `This is an observation about the audit record rather than a conclusion about the plant. It means the organisation cannot demonstrate from its own findings history whether this failure mode was previously detected, corrected and verified, so the same weakness may be present elsewhere without a precedent to point at.`,
+      `The auditor should record the failure mode explicitly on the finding so that future audits can match it, and should note in the report that the gap is a coverage limitation of the audit programme rather than a clean history.`,
+    ].join("\n\n");
     alerts.push({
       id: alertId(input.auditId, "precedent-coverage-gap", "portfolio"),
       auditId: input.auditId, code: "precedent-coverage-gap", severity: "low",
       title: "No comparable finding exists in any prior audit",
-      narrative: `${input.precedent.coverageStatement} This is an observation about the audit record, not a conclusion about the plant: it means the organisation cannot demonstrate, from its own findings history, whether this failure mode was previously detected and corrected.`,
+      narrative,
       status: "open", findingId: input.precedent.scope.findingId ?? null,
       sourceIds: [input.auditId, ...input.precedent.relatedAudits.map(a => a.auditId)], raisedAt: now,
     });
@@ -133,6 +154,13 @@ export async function persistAuditAlerts(alerts: AuditAlert[]): Promise<{ insert
     if ((rows as any[]).length) {
       const current = parsed((rows as any[])[0].payload);
       if (current.status === "acknowledged") { existing++; continue; }
+      // Keep the alert text in step with the records it describes, but never resurrect a
+      // human acknowledgement and never rewrite the original raise time.
+      const refreshed = { ...alert, raisedAt: current.raisedAt ?? alert.raisedAt };
+      const payload = JSON.stringify(refreshed);
+      if (payload !== JSON.stringify(current)) {
+        await pool().query("UPDATE part21_domain_records SET payload=?, content_sha256=?, updated_at=NOW(3) WHERE record_type='warning' AND record_id=? AND audit_id=?", [payload, crypto.createHash("sha256").update(payload).digest("hex"), alert.id, alert.auditId]);
+      }
       existing++;
       continue;
     }
@@ -151,7 +179,11 @@ export async function raiseAuditAlerts(auditId: string, findingId?: string | nul
   const precedent = await buildPrecedentPacket({ auditId, findingId: findingId ?? null }).catch(() => null);
   const alerts = deriveAlerts({ auditId, findings, evidence, changes, precedent });
   const result = await persistAuditAlerts(alerts);
-  return { auditId, findingId: findingId ?? null, alerts, ...result };
+  // Imported lazily so the pure rules stay testable without a network or database layer.
+  const { dispatchAuditAlerts } = await import("./alert-webhook");
+  const deliveries = await dispatchAuditAlerts(alerts);
+  // Report persisted state so an acknowledged alert is never shown as open again.
+  return { auditId, findingId: findingId ?? null, alerts: await listAuditAlerts(auditId), derived: alerts.length, ...result, deliveries };
 }
 
 export async function listAuditAlerts(auditId: string): Promise<AuditAlert[]> {

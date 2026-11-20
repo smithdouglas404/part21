@@ -143,7 +143,7 @@ describe("database-only graph grounding", () => {
   });
 });
 
-function approvedWriterFake(mode: "accepted" | "unapproved" | "wrong-digest" | "event-failure" | "revision-conflict" = "accepted") {
+function approvedWriterFake(mode: "accepted" | "unapproved" | "wrong-digest" | "event-failure" | "revision-conflict" | "baseline-exists" = "accepted") {
   const sourcePayload = { id: FA, auditId: A };
   const input: ApprovedGraphRevisionInput = { entityKind: "node", entityId: "graph-fa", auditId: A, eventId: "test-new-primary-event", expectedRevision: 0, validFrom: "2026-11-03T15:30:00.000Z", actor: "test-worker-principal", sourceRecordType: "finding", sourceRecordId: FA, sourceSha256: crypto.createHash("sha256").update(JSON.stringify(sourcePayload)).digest("hex"), sourceDigestKind: "payload", snapshot: { id: "graph-fa", type: "finding", label: "test-approved-label", payload: { auditId: A, sourceRecordType: "finding", sourceRecordId: FA } }, approvalRecordType: "human_approval", approvalRecordId: "test-approval" };
   const approval = { auditId: A, status: mode === "unapproved" ? "pending" : "approved", actorType: "human", qualified: true, approvedBy: "test-qualified-reviewer", approvedAt: "2026-11-18T11:00:00.000Z", artifactSha256: mode === "wrong-digest" ? "0".repeat(64) : graphRevisionDigest(input, ontology) };
@@ -155,6 +155,7 @@ function approvedWriterFake(mode: "accepted" | "unapproved" | "wrong-digest" | "
     if (sql.startsWith("SELECT audit_id,payload")) return [[{ audit_id: A, payload: approval }], []];
     if (sql.includes("UTC_TIMESTAMP")) return [[{ now: NOW }], []];
     if (sql.startsWith("SELECT * FROM part21_graph_nodes")) return [[], []];
+    if (sql.startsWith("SELECT revision FROM part21_graph_revisions")) return [mode === "baseline-exists" ? [{ revision: 0 }] : [], []];
     if (sql.startsWith("SELECT MAX(revision)")) return [[{ revision: mode === "revision-conflict" ? 3 : null }], []];
     if (sql.startsWith("SELECT id FROM part21_graph_events")) return [[], []];
     if (sql.startsWith("INSERT")) { if (mode === "event-failure" && sql.includes("part21_graph_events")) throw new Error("Injected event write failure"); return [{ affectedRows: 1 }, []]; }
@@ -174,6 +175,14 @@ describe("approved graph revision transaction", () => {
   it.each(["unapproved", "wrong-digest", "revision-conflict"] as const)("refuses %s before any graph mutation", async (mode) => {
     const fake = approvedWriterFake(mode); await expect(fake.writer.commitApprovedGraphRevision(fake.input)).rejects.toThrow();
     expect(fake.calls.some((c) => c.sql.startsWith("INSERT"))).toBe(false); expect(fake.calls.some((c) => c.sql === "ROLLBACK")).toBe(true);
+  });
+  it("does not re-bootstrap revision 0 when an approved baseline already occupies it", async () => {
+    const fake = approvedWriterFake("baseline-exists");
+    const result = await fake.writer.commitApprovedGraphRevision(fake.input);
+    expect(result.revision).toBe(1);
+    const revisionInserts = fake.calls.filter((call) => call.sql.includes("INSERT INTO part21_graph_revisions"));
+    expect(revisionInserts).toHaveLength(1);
+    expect(revisionInserts[0].values?.[3]).toBe(1);
   });
   it("rolls back the entire projection if event append fails", async () => {
     const fake = approvedWriterFake("event-failure"); await expect(fake.writer.commitApprovedGraphRevision(fake.input)).rejects.toThrow("event write failure");

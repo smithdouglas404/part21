@@ -286,7 +286,8 @@ export function createApprovedGraphWriter(dependencies: { database: () => StoreS
         const serialized = JSON.stringify(snapshot);
         await connection.query("INSERT INTO part21_graph_revisions (entity_kind,entity_id,audit_id,revision,valid_from,valid_to,recorded_at,recorded_by,snapshot,snapshot_sha256,source_record_type,source_record_id,source_sha256,ontology_config_id,ontology_version,ontology_sha256,approval_record_type,approval_record_id,provenance) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", [input.entityKind, input.entityId, input.auditId, revision, start == null ? null : new Date(start), end == null ? null : new Date(end), new Date(recordedAt), revision === 0 ? null : input.actor, serialized, crypto.createHash("sha256").update(serialized).digest("hex"), input.sourceRecordType, input.sourceRecordId, revision === 0 ? null : input.sourceSha256, revision === 0 ? null : ontology.configId, revision === 0 ? null : ontology.version, revision === 0 ? null : ontology.sourceSha256, revision === 0 ? null : input.approvalRecordType, revision === 0 ? null : input.approvalRecordId, provenance]);
       }
-      if (existing && currentRevision === 0) {
+      const [baselineRows] = await connection.query("SELECT revision FROM part21_graph_revisions WHERE entity_kind=? AND entity_id=? AND audit_id=? AND revision=0", [input.entityKind, input.entityId, input.auditId]);
+      if (existing && currentRevision === 0 && baselineRows.length === 0) {
         const payload = parseStorePayload(existing.payload);
         const start = payload.validFrom ?? payload.effectiveFrom;
         const end = payload.validTo ?? payload.effectiveTo;

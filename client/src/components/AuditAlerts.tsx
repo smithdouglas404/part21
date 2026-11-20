@@ -75,9 +75,28 @@ export default function AuditAlerts({ auditId }: { auditId: string }) {
   };
 
   const openAlerts = alerts.filter(alert => alert.status === "open");
-  const urgent = openAlerts.some(alert => alert.severity === "critical" || alert.severity === "high");
+  const urgentAlerts = openAlerts.filter(alert => alert.severity === "critical" || alert.severity === "high");
+  const urgent = urgentAlerts.length > 0;
+  const highest = openAlerts.find(alert => alert.severity === "critical") ?? urgentAlerts[0];
 
   return (
+    <>
+      {urgent && !open && (
+        <button
+          onClick={() => setOpen(true)}
+          className="fixed inset-x-0 top-0 z-50 flex items-center justify-center gap-3 border-b-2 border-red-300 bg-red-600 px-4 py-2 text-sm font-semibold text-white shadow-lg transition hover:bg-red-700"
+          aria-label="Open urgent audit alerts"
+        >
+          <span className="relative flex h-2.5 w-2.5">
+            <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-white opacity-75" />
+            <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-white" />
+          </span>
+          <AlertTriangle size={15} />
+          {urgentAlerts.length} open {urgentAlerts.length === 1 ? "alert requires" : "alerts require"} attention in {auditId}
+          {highest ? ` — ${highest.title}` : ""}
+          <span className="rounded bg-white/20 px-2 py-0.5 text-xs uppercase tracking-wide">Review</span>
+        </button>
+      )}
     <div className="fixed bottom-5 right-5 z-50 flex flex-col items-end gap-3">
       {open && (
         <div className="w-[26rem] max-h-[70vh] overflow-y-auto rounded-xl border border-border bg-card p-4 shadow-2xl">
@@ -103,7 +122,7 @@ export default function AuditAlerts({ auditId }: { auditId: string }) {
                   <span className="text-xs text-muted-foreground">{alert.code}{alert.findingId ? ` · ${alert.findingId}` : ""}</span>
                 </div>
                 <p className="text-sm font-medium">{alert.title}</p>
-                <p className="mt-1 text-xs leading-relaxed text-muted-foreground">{alert.narrative}</p>
+                <p className="mt-1 whitespace-pre-line text-xs leading-relaxed text-muted-foreground">{alert.narrative}</p>
                 {alert.status === "acknowledged" ? (
                   <p className="mt-2 flex items-center gap-1 text-[11px] text-emerald-600">
                     <Check size={12} /> Acknowledged by {alert.acknowledgedBy}{alert.rationale ? ` — ${alert.rationale}` : ""}
@@ -129,7 +148,7 @@ export default function AuditAlerts({ auditId }: { auditId: string }) {
 
       <button
         onClick={() => setOpen(value => !value)}
-        className={`relative flex h-14 w-14 items-center justify-center rounded-full shadow-xl transition ${urgent ? "bg-red-600 text-white" : "bg-slate-800 text-white"}`}
+        className={`relative flex h-14 w-14 items-center justify-center rounded-full shadow-xl transition ${urgent ? "animate-pulse bg-red-600 text-white ring-4 ring-red-300" : "bg-slate-800 text-white"}`}
         aria-label="Audit alerts"
       >
         <Bell size={22} />
@@ -140,5 +159,6 @@ export default function AuditAlerts({ auditId }: { auditId: string }) {
         )}
       </button>
     </div>
+    </>
   );
 }
