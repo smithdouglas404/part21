@@ -1,4 +1,5 @@
 import { citationsForPacket, regulatoryExcerptsFor } from "./regulatory-context";
+import { buildPrecedentPacket } from "./precedent";
 import { part21ClockBrief } from "./part21-case";
 import { createAgentServices, requireAgentScope, type AgentServices, type AgentScope, type AgentPrincipal, type AgentConversation, type AgentRecord, type GovernedSkill } from "./agent-runtime";
 import { runAuditSkill, previewAuditSkill, prepareFindingDraftSnapshot, type AuditSkillInput } from "./agentkit";
@@ -24,6 +25,14 @@ function questionInput(question: string, auditId?: string, findingId?: string, o
   if (!options?.principal) throw new Error("A trusted audit-scoped principal is required.");
   return { auditId, findingId, actor: options.actor ?? options.principal.actor ?? options.principal.id, principal: options.principal, skillId: options.skillId ?? questionSkill(question), skillVersion: options.skillVersion, answers: options.answers ?? {}, evidenceBindings: options.evidenceBindings };
 }
+/** Shape check for the narrative requirement: prose paragraphs, not bullet fragments. */
+export function narrativeShape(text: string) {
+  const paragraphs = text.split(/\n\s*\n/).map(part => part.trim()).filter(Boolean);
+  const words = text.trim().split(/\s+/).filter(Boolean).length;
+  const bulletLines = text.split("\n").filter(line => /^\s*([-*•]|\d+\.)\s+/.test(line)).length;
+  const longest = paragraphs.reduce((max, part) => Math.max(max, part.split(/\s+/).filter(Boolean).length), 0);
+  return { words, paragraphs: paragraphs.length, bulletLines, longestParagraphWords: longest, compliant: words >= 140 && paragraphs.length >= 3 && bulletLines === 0 && longest >= 60 };
+}
 export function buildLlmGroundingPacket(run: Awaited<ReturnType<typeof previewAuditSkill>>) {
   return { auditId: run.auditId, findingId: run.findingId ?? null, traceId: run.traceId, appliedSkill: run.appliedSkill, skillContract: run.skillContract, skillRevision: run.skillRevision, skillHash: run.skillHash, configurationStatus: run.configurationStatus, graphSource: run.graph?.source ?? null, schema: run.graph?.schema ?? null, ontologyVersion: run.graph?.ontologyVersion ?? null, nodeCount: run.graph?.nodes.length ?? 0, edgeCount: run.graph?.edges.length ?? 0, temporalEventCount: run.graph?.temporalEvents.length ?? 0, graphSnapshot: run.graph ? { nodes: run.graph.nodes, edges: run.graph.edges, temporalEvents: run.graph.temporalEvents } : null, traversalProof: run.traversalProof, sourceIds: run.sourceIds, executedTools: run.toolCalls, answers: run.answers, policy: run.policy, unknowns: run.unknowns, followUpQuestions: run.followUpQuestions, humanGate: run.humanGate, factBoundary: "Only exact supplied database records and completed tool results are facts. Questions and answers are assertions, not verified evidence. No inferred supplier substitutions, record counts, clocks, approvals, regulatory paths, or final verdicts. Human review required." };
 }
@@ -35,26 +44,37 @@ export async function answerGroundedQuestion(question: string, auditId?: string,
 async function invokeGrounded(run: Awaited<ReturnType<typeof previewAuditSkill>>, question: string, services: AgentServices, communicationContext?: AgentRecord) {
   const skillForCitations = (run as any)?.skillContract && typeof (run as any).skillContract === "object" ? (run as any).skillContract : null;
   const regulatoryExcerpts = await regulatoryExcerptsFor(citationsForPacket({ clockBrief: communicationContext?.part21Clocks ?? null, skill: skillForCitations })).catch(() => []);
+  const precedentTraversal = await buildPrecedentPacket({ auditId: run.auditId, findingId: run.findingId ?? null, question }).catch(() => null);
   const packet = {
     ...buildLlmGroundingPacket(run),
     ...(communicationContext ? { communicationContext, ...(communicationContext.part21Clocks ? { part21Clocks: communicationContext.part21Clocks } : {}) } : {}),
     ...(regulatoryExcerpts.length ? { regulatoryExcerpts } : {}),
+    ...(precedentTraversal ? { precedentTraversal } : {}),
   };
   if (!run.graph) return { ...run, answer: "Audit portfolio questions only. No audit-scoped graph traversal is available; provider not invoked and no recommendation issued.", provider: "provider not invoked", model: null, llmInvoked: false, groundedContextPacket: packet };
   const requestedModel = process.env.PART21_LLM_MODEL || "claude-haiku-4-5";
   const call = { id: services.id(), sequence: run.toolCalls.length + 1, tool: "llm.invokeLLM", arguments: { requestedModel, auditId: run.auditId, findingId: run.findingId, packet }, status: "completed" as "completed" | "unknown", result: {} as AgentRecord, sourceIds: run.sourceIds, startedAt: services.now(), completedAt: "" };
   try {
     const response = await services.invoke({ model: requestedModel, maxTokens: 1200, messages: [
-      { role: "system", content: "You are a nuclear assurance recommendation assistant, not a regulatory decision maker. Use only the supplied audited database/tool packet. Preserve the applied skill ID, revision and draft/active status. Ask the unanswered required questions individually. Label missing evidence unknown. Never invent facts, legal clocks, approvals, supplier substitutions, affected record counts, or compliance conclusions. Candidate draft guidance has no regulatory approval. When the packet contains part21Clocks, report the next open gate with its citation, due date and days remaining exactly as computed, and ask the one question needed to close that gate. Never compute, extend or restart a statutory clock yourself. When the packet contains regulatoryExcerpts, you may quote that text verbatim and must attribute it to the cited provision and snapshot date; quoted regulation is not a finding, an interpretation or a decision. Return concise source-linked guidance with human review required." },
+      { role: "system", content: "You are a nuclear assurance recommendation assistant, not a regulatory decision maker. Use only the supplied audited database/tool packet. Preserve the applied skill ID, revision and draft/active status. Ask the unanswered required questions individually. Label missing evidence unknown. Never invent facts, legal clocks, approvals, supplier substitutions, affected record counts, or compliance conclusions. Candidate draft guidance has no regulatory approval. When the packet contains part21Clocks, report the next open gate with its citation, due date and days remaining exactly as computed, and ask the one question needed to close that gate. Never compute, extend or restart a statutory clock yourself. When the packet contains regulatoryExcerpts, you may quote that text verbatim and must attribute it to the cited provision and snapshot date; quoted regulation is not a finding, an interpretation or a decision. WRITING FORM: every insight and recommendation must be narrative prose of at least three paragraphs and roughly 220 to 400 words. Never answer with one sentence, a bullet list, or a stack of labelled fragments. Paragraph one states what the records show and names the record IDs, severities, owners and dates. Paragraph two states what precedentTraversal shows about earlier audits, citing the audit and finding IDs it returns; if it reports no comparable finding, say so plainly and treat that absence as unknown rather than as evidence that the control held. Paragraph three states the recommendation, the citation that supports it, the evidence still missing and the human decision required. Use complete sentences and connect the reasoning between paragraphs. A terse answer is a defect even when every fact in it is correct." },
       { role: "user", content: `${question}\n\nAudit-scoped grounding packet:\n${JSON.stringify(packet)}` },
     ] });
     if ((response as any).error) throw new Error(String((response as any).error.message ?? "Provider returned an error"));
     const content = response.choices?.[0]?.message?.content;
     if (typeof content !== "string" || !content.trim()) throw new Error("Provider returned no narrative; no substitute recommendation is generated.");
-    call.result = { responseId: response.id ?? null, requestedModel, actualModel: response.model || null, usage: response.usage ?? null, answer: content };
+    let narrative = content;
+    if (!narrativeShape(content).compliant) {
+      const expansion = await services.invoke({ model: requestedModel, maxTokens: 1200, messages: [
+        { role: "system", content: "You rewrite a terse nuclear assurance answer as narrative prose. Preserve every fact, record ID, citation and uncertainty exactly; add no new facts, clocks or conclusions. Produce at least three paragraphs and roughly 220 to 400 words in complete sentences with no bullet lists: first what the records show, second what prior audits show or that no precedent exists, third the recommendation, the supporting citation, the missing evidence and the human decision required." },
+        { role: "user", content: `Question: ${question}\n\nGrounded packet:\n${JSON.stringify(packet)}\n\nTerse answer to rewrite:\n${content}` },
+      ] }).catch(() => null);
+      const expanded = (expansion as any)?.choices?.[0]?.message?.content;
+      if (typeof expanded === "string" && narrativeShape(expanded).words > narrativeShape(content).words) narrative = expanded;
+    }
+    call.result = { responseId: response.id ?? null, requestedModel, actualModel: response.model || null, usage: response.usage ?? null, answer: narrative, narrative: narrativeShape(narrative) };
     call.completedAt = services.now();
     if (run.durable) await services.recordTool(run.traceId, call);
-    const result = { ...run, toolCalls: [...run.toolCalls, call], question, answer: content, provider: "managed-invokeLLM", model: response.model || null, requestedModel, modelIdentityStatus: response.model ? "response-reported" : "unknown", llmInvoked: true, invocationMode: "live grounded recommendation", groundedContextPacket: packet, usage: response.usage, warning: null, humanReviewRequired: true };
+    const result = { ...run, toolCalls: [...run.toolCalls, call], question, answer: narrative, narrative: narrativeShape(narrative), precedentTraversal, provider: "managed-invokeLLM", model: response.model || null, requestedModel, modelIdentityStatus: response.model ? "response-reported" : "unknown", llmInvoked: true, invocationMode: "live grounded recommendation", groundedContextPacket: packet, usage: response.usage, warning: null, humanReviewRequired: true };
     if (run.durable) await services.finishRun(result);
     return result;
   } catch (error) {
