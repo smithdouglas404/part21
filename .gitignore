@@ -114,3 +114,4 @@ client/public/__manus__/version.json
 
 # Local MCP runtime data — never commit client-owned workbooks or event history
 data/
+.vercel

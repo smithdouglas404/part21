@@ -1,0 +1,25 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "framework": "vite",
+  "installCommand": "pnpm install --frozen-lockfile",
+  "buildCommand": "pnpm build:static",
+  "outputDirectory": "dist/public",
+  "rewrites": [
+    {
+      "source": "/api/:path*",
+      "destination": "https://part21ops-l6crvfht.manus.space/api/:path*"
+    },
+    {
+      "source": "/mcp/:path*",
+      "destination": "https://part21ops-l6crvfht.manus.space/mcp/:path*"
+    },
+    {
+      "source": "/manus-storage/:path*",
+      "destination": "https://part21ops-l6crvfht.manus.space/manus-storage/:path*"
+    },
+    {
+      "source": "/(.*)",
+      "destination": "/index.html"
+    }
+  ]
+}
