@@ -8,7 +8,9 @@ import { getGroundedGraphContext } from "./graph-store";
 import { getDomainPortfolio, upsertDomainRecord } from "./domain-store";
 import { attachKanbanAsset, createKanbanItem, listKanbanItems, moveKanbanItem } from "./kanban-store";
 import { buildLiveAuditBriefAgent, runFindingIntakeDialogue } from "./ai";
+import { currentPrincipal } from "./access-control";
 
+function requestPrincipal() { try { return currentPrincipal() as any; } catch { return undefined; } }
 export async function getMcpManifest() {
   const configuredConnectors = await listControlledConfigurationPayloads<any>("connector");
   return {
@@ -171,11 +173,11 @@ export async function callMcpTool(name: string, args: Record<string, unknown> = 
     case "agent_intake":
       return runFindingIntakeDialogue({ auditId: String(args.auditId ?? ""), message: String(args.message ?? ""), conversationId: args.conversationId ? String(args.conversationId) : undefined, finalize: args.finalize === true, draftTitle: args.draftTitle ? String(args.draftTitle) : undefined, draftDescription: args.draftDescription ? String(args.draftDescription) : undefined, severity: args.severity ? String(args.severity) : undefined, actor: args.actor ? String(args.actor) : undefined });
     case "field_kanban_create":
-      return createKanbanItem({ auditId: String(args.auditId ?? ""), title: String(args.title ?? ""), description: String(args.description ?? ""), status: (args.status as any) ?? "backlog", priority: (args.priority as any) ?? "medium", attention: true, source: "field", ownerPersonId: args.ownerPersonId ? String(args.ownerPersonId) : undefined, findingId: args.findingId ? String(args.findingId) : undefined, productId: args.productId ? String(args.productId) : undefined, sourceRecordId: args.sourceRecordId ? String(args.sourceRecordId) : undefined, observedAt: args.observedAt ? String(args.observedAt) : undefined, createdBy: String(args.createdBy ?? "Muse field operator") });
+      return createKanbanItem({ auditId: String(args.auditId ?? ""), title: String(args.title ?? ""), description: String(args.description ?? ""), status: (args.status as any) ?? "backlog", priority: (args.priority as any) ?? "medium", attention: true, source: "field", ownerPersonId: args.ownerPersonId ? String(args.ownerPersonId) : undefined, findingId: args.findingId ? String(args.findingId) : undefined, productId: args.productId ? String(args.productId) : undefined, sourceRecordId: args.sourceRecordId ? String(args.sourceRecordId) : undefined, observedAt: args.observedAt ? String(args.observedAt) : undefined, createdBy: String(args.createdBy ?? "Muse field operator") }, requestPrincipal());
     case "field_kanban_move":
-      return moveKanbanItem(String(args.itemId ?? ""), (String(args.status ?? "backlog").toLowerCase() === "active" ? "in_progress" : String(args.status ?? "backlog").toLowerCase()) as any, String(args.actor ?? "Muse field operator"));
+      return moveKanbanItem(String(args.itemId ?? ""), (String(args.status ?? "backlog").toLowerCase() === "active" ? "in_progress" : String(args.status ?? "backlog").toLowerCase()) as any, String(args.actor ?? "Muse field operator"), undefined, undefined, undefined, requestPrincipal());
     case "field_kanban_attach":
-      return attachKanbanAsset({ itemId: String(args.itemId ?? ""), auditId: String(args.auditId ?? ""), filename: String(args.filename ?? "field-attachment"), mediaType: String(args.mediaType ?? "application/octet-stream"), kind: (args.kind as any) ?? "document", base64: args.base64 ? String(args.base64) : undefined, transcript: args.transcript ? String(args.transcript) : undefined, createdBy: String(args.createdBy ?? "Muse field operator") });
+      return attachKanbanAsset({ itemId: String(args.itemId ?? ""), auditId: String(args.auditId ?? ""), filename: String(args.filename ?? "field-attachment"), mediaType: String(args.mediaType ?? "application/octet-stream"), kind: (args.kind as any) ?? "document", base64: args.base64 ? String(args.base64) : undefined, transcript: args.transcript ? String(args.transcript) : undefined, createdBy: String(args.createdBy ?? "Muse field operator") }, requestPrincipal());
     default:
       return { error: `Unknown tool: ${name}`, availableTools: mcpTools.map((tool) => tool.name) };
   }

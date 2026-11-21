@@ -35,7 +35,7 @@ import { getGroundedGraphContext, getGraphStoreStatus, validateGraphOntology } f
 import { getDomainPortfolio, getDomainStoreStatus, listAudits, writeDomainRecordWithEvent } from "../domain-store";
 import { getConfigurationStoreStatus, getControlledConfiguration, listControlledConfigurations, listControlledConfigurationPayloads } from "../config-store";
 import { getMergedStudioOpenApi, getStudioGatewayStatus, studioProxyMiddleware } from "../studio-gateway";
-import { resolveRequestPrincipal, AssuranceAccessError, runAsPrincipal, currentPrincipal, assertAuditPermission } from "../access-control";
+import { resolveRequestPrincipal, AssuranceAccessError, runAsPrincipal, currentPrincipal, assertAuditPermission, requireAdministrator } from "../access-control";
 import { configureEvidenceRuntime as configureVaultRuntime } from "../evidence-vault";
 import { resolveCitations } from "../citation-resolver";
 import { regulatoryGraphStatus } from "../regulatory-graph";
@@ -91,12 +91,58 @@ async function temporalSupervisorHealth(): Promise<{ reachable: boolean; workerS
   } catch { return { reachable: false }; }
 }
 
+/**
+ * Express 4 does not observe rejected promises. A handler that throws after `await` would leave
+ * the request open until the client times out, which is indistinguishable from a hang. Every
+ * registered route is wrapped so a rejection becomes an explicit JSON error with a defensible
+ * status: 4xx for bad input, 404 for missing records, 503 for unconfigured services, 500 otherwise.
+ */
+function requireWritePrincipal() {
+  const principal = currentPrincipal();
+  if (principal.access !== "make_changes" || principal.id === "read-only-visitor") {
+    throw new AssuranceAccessError("This operation requires a signed-in identity with make-changes access.", 403);
+  }
+  return principal;
+}
+
+function connectorAdministrationAllowed(req: any) {
+  const key = process.env.CONNECT_ADMIN_KEY;
+  if (key && req.headers["x-connect-admin-key"] === key) return true;
+  try { requireAdministrator(currentPrincipal()); return true; } catch { return false; }
+}
+
+function respondWithError(res: any, error: unknown) {
+  if (res.headersSent) return;
+  const message = error instanceof Error ? error.message : "Request failed";
+  const explicit = typeof (error as any)?.status === "number" ? Number((error as any).status) : undefined;
+  const missing = /not found|does not exist|no such|does not belong/i.test(message);
+  const forbidden = /missing permission|permission required|not authorized|look-only/i.test(message);
+  const conflict = /baseline|conflict|already active|already retired/i.test(message);
+  const invalid = /\brequired\b|\brequires\b|no default operational identity|unsupported|^Invalid |must be|must not|is not allowed|already exists|cannot|not permitted|not present|Attach originals/i.test(message);
+  const unavailable = /not configured|unavailable|not available/i.test(message);
+  const status = explicit ?? (forbidden ? 403 : missing ? 404 : conflict ? 409 : invalid ? 400 : unavailable ? 503 : 500);
+  if (status >= 500) console.error(`[api] ${message}`);
+  res.status(status).json({ ok: false, error: message });
+}
+
 async function startServer() {
   const app = express();
   const server = createServer(app);
   // Configure body parser with larger size limit for file uploads
   app.use(express.json({ limit: "50mb" }));
   app.use(express.urlencoded({ limit: "50mb", extended: true }));
+  for (const method of ["get", "post", "put", "patch", "delete"] as const) {
+    const register = (app as any)[method].bind(app);
+    (app as any)[method] = (path: any, ...handlers: any[]) => register(path, ...handlers.map((handler: any) => {
+      if (typeof handler !== "function" || handler.length >= 4) return handler;
+      return (req: any, res: any, next: any) => {
+        try {
+          const result = handler(req, res, next);
+          if (result && typeof result.then === "function") result.catch((error: unknown) => respondWithError(res, error));
+        } catch (error) { respondWithError(res, error); }
+      };
+    }));
+  }
   app.get("/api/health", (_req, res) => res.json({ status: "ok" }));
   // Every request runs inside a principal context so downstream services (the evidence vault,
   // the Kanban, the graph) can authorize the caller without each route re-deriving identity.
@@ -152,13 +198,18 @@ async function startServer() {
       // Creating an audit is an ordinary auditor activity, not an administrative one. A
       // look-only principal may read the register but must not open a new engagement.
       if (principal.access !== "make_changes") throw new AssuranceAccessError("Look-only access cannot create an audit.", 403);
-      const title = String(req.body?.title ?? "").trim();
-      const scope = String(req.body?.scope ?? "").trim();
-      const due = String(req.body?.due ?? "").trim();
-      const profileId = String(req.body?.profileId ?? "").trim();
+      const raw = req.body ?? {};
+      for (const field of ["title", "scope", "due", "profileId"] as const) {
+        if (raw[field] !== undefined && typeof raw[field] !== "string") return res.status(400).json({ error: `${field} must be a string.` });
+      }
+      const title = String(raw.title ?? "").trim();
+      const scope = String(raw.scope ?? "").trim();
+      const due = String(raw.due ?? "").trim();
+      const profileId = String(raw.profileId ?? "").trim();
       const requestedStandard = String(req.body?.standard ?? "").trim();
       if (!title || !scope || !due || !profileId) return res.status(400).json({ error: "title, scope, due and profileId are required." });
-      if (!/^\d{4}-\d{2}-\d{2}$/.test(due) || Number.isNaN(Date.parse(due))) return res.status(400).json({ error: "due must be an ISO date (YYYY-MM-DD)." });
+      const parsedDue = /^\d{4}-\d{2}-\d{2}$/.test(due) ? new Date(`${due}T00:00:00.000Z`) : null;
+      if (!parsedDue || Number.isNaN(parsedDue.getTime()) || parsedDue.toISOString().slice(0, 10) !== due) return res.status(400).json({ error: "due must be a real calendar date in ISO form (YYYY-MM-DD)." });
       const { profiles } = await getAuditProfiles();
       const profile = profiles.find(item => item.id === profileId);
       if (!profile) return res.status(400).json({ error: `Unknown governed audit profile ${profileId}.` });
@@ -229,12 +280,15 @@ async function startServer() {
     }
   });
   app.post("/api/v1/connect/tokens", async (req, res) => {
-    if (process.env.CONNECT_ADMIN_KEY && req.headers["x-connect-admin-key"] !== process.env.CONNECT_ADMIN_KEY) return res.status(403).json({ error: "Connector administration key required." });
+    if (!connectorAdministrationAllowed(req)) return res.status(403).json({ error: "Connector administration requires an application administrator or the connector administration key." });
     res.json(await createConnectToken({ label: String(req.body?.label ?? "Meta Muse"), actor: String(req.body?.actor ?? ""), role: String(req.body?.role ?? ""), auditId: req.body?.auditId ? String(req.body.auditId) : undefined, access: req.body?.access === "make_changes" ? "make_changes" : "look_only" }));
   });
-  app.get("/api/v1/connect/tokens", async (_req, res) => res.json({ tokens: await listConnectTokens() }));
+  app.get("/api/v1/connect/tokens", async (req, res) => {
+    if (!connectorAdministrationAllowed(req)) return res.status(403).json({ error: "Connector administration requires an application administrator or the connector administration key." });
+    res.json({ tokens: await listConnectTokens() });
+  });
   app.post("/api/v1/connect/tokens/:tokenId/revoke", async (req, res) => {
-    if (process.env.CONNECT_ADMIN_KEY && req.headers["x-connect-admin-key"] !== process.env.CONNECT_ADMIN_KEY) return res.status(403).json({ error: "Connector administration key required." });
+    if (!connectorAdministrationAllowed(req)) return res.status(403).json({ error: "Connector administration requires an application administrator or the connector administration key." });
     res.json(await revokeConnectToken(req.params.tokenId, String(req.body?.actor ?? "Connector administrator")));
   });
   app.post("/api/v1/tools/:tool", async (req, res) => {
@@ -291,10 +345,10 @@ async function startServer() {
   app.post("/api/approvals/workbooks/:workbookId", async (req, res) => res.json(await approveWorkbookImport(req.params.workbookId, String(req.body?.actor ?? "Quality approver"), String(req.body?.note ?? "Approved after human review"))));
   app.get("/api/document-control/status", async (_req, res) => res.json(await getDocumentControlStatus()));
   app.get("/api/documents", async (req, res) => res.json({ documents: await listControlledDocuments({ auditId: typeof req.query.auditId === "string" ? req.query.auditId : undefined }) }));
-  app.post("/api/documents", async (req, res) => res.json(await registerControlledDocument(req.body ?? {})));
-  app.post("/api/documents/:documentId/cybersecurity-review", async (req, res) => res.json(await reviewDocumentCybersecurity(req.params.documentId, req.body ?? {})));
-  app.post("/api/documents/:documentId/notarize", async (req, res) => res.json(await notarizeDocumentWithHederaDemo(req.params.documentId, String(req.body?.actor ?? "Quality approver"))));
-  app.post("/api/documents/:documentId/part21-decision", async (req, res) => res.json(await generateSyntheticPart21Decision(req.params.documentId, String(req.body?.actor ?? "Part 21 review agent"))));
+  app.post("/api/documents", async (req, res) => { requireWritePrincipal(); res.json(await registerControlledDocument(req.body ?? {})); });
+  app.post("/api/documents/:documentId/cybersecurity-review", async (req, res) => { requireWritePrincipal(); res.json(await reviewDocumentCybersecurity(req.params.documentId, req.body ?? {})); });
+  app.post("/api/documents/:documentId/notarize", async (req, res) => { requireWritePrincipal(); res.json(await notarizeDocumentWithHederaDemo(req.params.documentId, String(req.body?.actor ?? currentPrincipal().actor))); });
+  app.post("/api/documents/:documentId/part21-decision", async (req, res) => { requireWritePrincipal(); res.json(await generateSyntheticPart21Decision(req.params.documentId, String(req.body?.actor ?? currentPrincipal().actor))); });
   app.get("/api/admin/excel/status", async (_req, res) => res.json(await getExcelAdapterStatus()));
   app.get("/api/admin/excel/samples", async (_req, res) => res.json(await listSampleWorkbooks()));
   app.get("/api/admin/excel/last", async (_req, res) => res.json(await readWorkbookSample()));
@@ -314,12 +368,29 @@ async function startServer() {
       findingId: String(req.body?.findingId ?? "FIND-CUSTOM-01"), title: String(req.body?.title ?? "Custom audit condition"), productId: String(req.body?.productId ?? "NSS-4820"), supplierId: String(req.body?.supplierId ?? "SUP-044"), controlFamily: String(req.body?.controlFamily ?? "21.51 traceability"), alternateConnector: req.body?.alternateConnector === "document-repository-live" ? "document-repository-live" : "vendor-erp-asterion",
     }));
   });
-  app.get("/api/agentkit/activity", async (req, res) => { try { res.json({ agents: await getAgentActivity(typeof req.query.agentId === "string" ? req.query.agentId : undefined) }); } catch (error) { res.status(503).json({ ok: false, error: error instanceof Error ? error.message : "Agent activity unavailable", databaseGroundingRequired: true }); } });
+  app.get("/api/agentkit/activity", async (req, res) => {
+    const auditId = String(req.query.auditId ?? "").trim();
+    if (!auditId) return res.status(400).json({ ok: false, error: "auditId is required for agent activity." });
+    res.json({ agents: await getAgentActivity(typeof req.query.agentId === "string" ? req.query.agentId : undefined, auditId) });
+  });
   app.get("/api/agentkit/manifest.json", async (_req, res) => res.json(await getAgentKitManifest()));
-  app.get("/api/graph/export", async (req, res) => res.json(await exportBitemporalGraph(typeof req.query.findingId === "string" ? req.query.findingId : undefined)));
-  app.post("/api/evidence/intake", async (req, res) => res.json(await registerEvidence(req.body ?? {})));
+  app.get("/api/graph/export", async (req, res) => {
+    const auditId = String(req.query.auditId ?? "").trim();
+    const findingId = typeof req.query.findingId === "string" ? req.query.findingId : undefined;
+    if (!auditId) return res.status(400).json({ ok: false, error: "auditId is required for graph export." });
+    res.json(await exportBitemporalGraph(findingId, auditId));
+  });
+  app.post("/api/evidence/intake", async (req, res) => {
+    // Never trust a body-supplied actor: the persisted custody record must name the caller.
+    const principal = requireWritePrincipal();
+    const result = await registerEvidence({ ...(req.body ?? {}), actor: principal.id }, principal);
+    // A rejected intake must not answer HTTP 200 with ok:false; clients and the Muse connector
+    // treat 2xx as a persisted custody record.
+    if ((result as any)?.ok === false) return res.status(400).json(result);
+    res.json(result);
+  });
   app.get("/api/reports/draft", async (req, res) => res.json(await getReportDraft(typeof req.query.findingId === "string" ? req.query.findingId : undefined)));
-  app.post("/api/reports/finalize", async (req, res) => { try { res.json(await finalizeAuditReport(String(req.body?.auditId ?? ""), String(req.body?.actor ?? "Qualified report approver"), String(req.body?.auditorNarrative ?? ""), req.body?.approved === true)); } catch (error) { res.status(409).json({ ok: false, error: error instanceof Error ? error.message : "Report finalization blocked", authoritativeGraphWrite: false }); } });
+  app.post("/api/reports/finalize", async (req, res) => { try { requireWritePrincipal(); res.json(await finalizeAuditReport(String(req.body?.auditId ?? ""), String(req.body?.actor ?? "Qualified report approver"), String(req.body?.auditorNarrative ?? ""), req.body?.approved === true)); } catch (error) { if (error instanceof AssuranceAccessError) return respondWithError(res, error); res.status(409).json({ ok: false, error: error instanceof Error ? error.message : "Report finalization blocked", authoritativeGraphWrite: false }); } });
   app.get("/api/people", async (req, res) => res.json(await listAssurancePeople(typeof req.query.roleId === "string" ? req.query.roleId : undefined)));
   app.get("/api/approval-rules", async (req, res) => res.json({ source: "mysql-domain-records", rules: await listApprovalRules(typeof req.query.decisionType === "string" ? req.query.decisionType as any : undefined) }));
   /**
@@ -329,14 +400,7 @@ async function startServer() {
    */
   const jsonRoute = (handler: (req: any, res: any) => Promise<unknown>) => async (req: any, res: any) => {
     try { await handler(req, res); }
-    catch (error) {
-      if (res.headersSent) return;
-      const message = error instanceof Error ? error.message : "Request failed";
-      const explicit = typeof (error as any)?.status === "number" ? Number((error as any).status) : undefined;
-      const unavailable = /not configured|unavailable|not available/i.test(message);
-      const missing = /not found|does not exist|no such/i.test(message);
-      res.status(explicit ?? (missing ? 404 : unavailable ? 503 : 500)).json({ ok: false, error: message });
-    }
+    catch (error) { respondWithError(res, error); }
   };
 
   app.get("/api/kanban", jsonRoute(async (req: any, res: any) => {
@@ -344,20 +408,32 @@ async function startServer() {
     if (!auditId) return res.status(400).json({ ok: false, error: "auditId is required to list Kanban items" });
     return res.json(await listKanbanItems(auditId));
   }));
-  app.post("/api/kanban/items", jsonRoute(async (req: any, res: any) => res.json(await createKanbanItem(req.body ?? {}))));
-  app.post("/api/kanban/items/:itemId/move", jsonRoute(async (req: any, res: any) => res.json(await moveKanbanItem(req.params.itemId, req.body?.status, String(req.body?.actor ?? "Field operator")))));
-  app.post("/api/kanban/items/:itemId/attachments", jsonRoute(async (req: any, res: any) => res.json(await attachKanbanAsset({ ...(req.body ?? {}), itemId: req.params.itemId }))));
-  app.post("/api/kanban/items/:itemId/communications", jsonRoute(async (req: any, res: any) => res.json(await appendKanbanCommunication({ ...(req.body ?? {}), itemId: req.params.itemId, auditId: String(req.body?.auditId ?? ""), conversationId: String(req.body?.conversationId ?? `KANBAN-${req.params.itemId}`), role: req.body?.role === "agent" || req.body?.role === "system" ? req.body.role : "user", actor: String(req.body?.actor ?? "Field operator"), text: String(req.body?.text ?? ""), skillIds: Array.isArray(req.body?.skillIds) ? req.body.skillIds.map(String) : [] }))));
+  app.post("/api/kanban/items", jsonRoute(async (req: any, res: any) => res.json(await createKanbanItem(req.body ?? {}, currentPrincipal() as any))));
+  app.post("/api/kanban/items/:itemId/move", jsonRoute(async (req: any, res: any) => res.json(await moveKanbanItem(req.params.itemId, req.body?.status, String(req.body?.actor ?? currentPrincipal().actor), String(req.body?.auditId ?? req.query.auditId ?? ""), req.body?.expectedRevision === undefined ? undefined : Number(req.body.expectedRevision), req.body?.reason ? String(req.body.reason) : undefined, currentPrincipal() as any))));
+  app.post("/api/kanban/items/:itemId/attachments", jsonRoute(async (req: any, res: any) => res.json(await attachKanbanAsset({ ...(req.body ?? {}), itemId: req.params.itemId }, currentPrincipal() as any))));
+  app.post("/api/kanban/items/:itemId/communications", jsonRoute(async (req: any, res: any) => res.json(await appendKanbanCommunication({ ...(req.body ?? {}), itemId: req.params.itemId, auditId: String(req.body?.auditId ?? ""), conversationId: String(req.body?.conversationId ?? `KANBAN-${req.params.itemId}`), role: req.body?.role === "agent" || req.body?.role === "system" ? req.body.role : "user", actor: String(req.body?.actor ?? currentPrincipal().actor), text: String(req.body?.text ?? ""), skillIds: Array.isArray(req.body?.skillIds) ? req.body.skillIds.map(String) : [] }, currentPrincipal() as any))));
   app.post("/api/reports/:auditId/approval-route", async (req, res) => { try { res.json(await routeFinalReportApproval(req.params.auditId, String(req.body?.personaId ?? ""), String(req.body?.routedBy ?? "Audit workflow"), String(req.body?.note ?? "Final report requires qualified human disposition."), { id: String(req.body?.personId ?? ""), name: String(req.body?.personName ?? ""), email: String(req.body?.personEmail ?? "") })); } catch (error) { res.status(409).json({ ok: false, error: error instanceof Error ? error.message : "Report routing failed" }); } });
-  app.get("/api/reports/approvals", async (req, res) => res.json(await listReportApprovalTasks(typeof req.query.auditId === "string" ? req.query.auditId : undefined)));
-  app.post("/api/reports/approvals/:approvalId/approve", async (req, res) => { try { res.json(await approveRoutedFinalReport(req.params.approvalId, String(req.body?.actor ?? ""), String(req.body?.note ?? ""))); } catch (error) { res.status(409).json({ ok: false, error: error instanceof Error ? error.message : "Report approval failed", authoritativeGraphWrite: false }); } });
+  app.get("/api/reports/approvals", async (req, res) => {
+    const auditId = String(req.query.auditId ?? "").trim();
+    if (!auditId) return res.status(400).json({ ok: false, error: "auditId is required to list report approvals." });
+    res.json(await listReportApprovalTasks(auditId));
+  });
+  app.post("/api/reports/approvals/:approvalId/approve", async (req, res) => { try { res.json(await approveRoutedFinalReport(req.params.approvalId, String(req.body?.actor ?? ""), String(req.body?.note ?? ""))); } catch (error) { if (error instanceof AssuranceAccessError) return respondWithError(res, error); res.status(409).json({ ok: false, error: error instanceof Error ? error.message : "Report approval failed", authoritativeGraphWrite: false }); } });
   app.get("/api/regulatory/pack", async (_req, res) => res.json(await getControlledRegulatoryPack()));
-  app.get("/api/regulatory/trace", async (req, res) => res.json(await traverseControlledRegulatoryTree(typeof req.query.findingId === "string" ? req.query.findingId : undefined)));
-  app.get("/api/regulatory/impact", async (req, res) => res.json(await assessControlledRemediationImpact(typeof req.query.findingId === "string" ? req.query.findingId : undefined)));
+  app.get("/api/regulatory/trace", async (req, res) => {
+    const auditId = String(req.query.auditId ?? "").trim();
+    if (!auditId) return res.status(400).json({ ok: false, error: "auditId and findingId are required for regulatory trace." });
+    res.json(await traverseControlledRegulatoryTree(typeof req.query.findingId === "string" ? req.query.findingId : undefined, auditId));
+  });
+  app.get("/api/regulatory/impact", async (req, res) => {
+    const auditId = String(req.query.auditId ?? "").trim();
+    if (!auditId) return res.status(400).json({ ok: false, error: "auditId and findingId are required for regulatory impact." });
+    res.json(await assessControlledRemediationImpact(typeof req.query.findingId === "string" ? req.query.findingId : undefined, auditId));
+  });
   app.get("/api/ai/status", (_req, res) => res.json(getAiStatus()));
   app.get("/api/graph/store/status", async (_req, res) => res.json(await getGraphStoreStatus()));
   app.get("/api/graph/ontology-validation", async (_req, res) => res.json(await validateGraphOntology()));
-  app.get("/api/graph/context", async (req, res) => { try { res.json(await getGroundedGraphContext(typeof req.query.findingId === "string" ? req.query.findingId : "", typeof req.query.auditId === "string" ? req.query.auditId : "")); } catch (error) { res.status(409).json({ ok: false, error: error instanceof Error ? error.message : "Graph context unavailable", databaseGroundingRequired: true }); } });
+  app.get("/api/graph/context", async (req, res) => { try { res.json(await getGroundedGraphContext(typeof req.query.findingId === "string" ? req.query.findingId : "", typeof req.query.auditId === "string" ? req.query.auditId : "")); } catch (error) { respondWithError(res, error); } });
   app.post("/api/ai/ask", async (req, res) => {
     const question = String(req.body?.question ?? "");
     const audits = await listAudits();
@@ -422,13 +498,26 @@ async function startServer() {
   app.get("/api/activity", (_req, res) => res.json({ entries: [] }));
   app.get("/api/governance/board", (_req, res) => res.json(getGovernanceBoard()));
   app.post("/api/governance/move", (req, res) => res.json(moveGovernanceItem(String(req.body?.id ?? ""), req.body?.target, String(req.body?.actor ?? "Assurance user"))));
-  app.post("/api/governance/decide", (req, res) => res.json(decideGovernanceItem(String(req.body?.id ?? ""), req.body?.action, String(req.body?.note ?? ""), req.body?.deferUntil, String(req.body?.actor ?? "Assurance user"))));
+  app.post("/api/governance/decide", jsonRoute(async (req: any, res: any) => {
+    requireWritePrincipal();
+    const result = decideGovernanceItem(String(req.body?.id ?? ""), req.body?.action, String(req.body?.note ?? ""), req.body?.deferUntil, String(req.body?.actor ?? currentPrincipal().actor));
+    if ((result as any)?.ok === false) return res.status(404).json(result);
+    return res.json(result);
+  }));
   app.get("/api/agents/registry", async (_req, res) => res.json(await getAgentRegistry()));
-  app.post("/api/agents/control", async (req, res) => res.json(await controlAgent(String(req.body?.agentId ?? ""), req.body?.action, String(req.body?.reason ?? ""))));
+  app.post("/api/agents/control", async (req, res) => { requireAdministrator(currentPrincipal()); res.json(await controlAgent(String(req.body?.agentId ?? ""), req.body?.action, String(req.body?.reason ?? ""))); });
   app.get("/api/policy/part21", async (_req, res) => res.json(await getControlledPolicyPack()));
-  app.get("/api/policy/graph", async (_req, res) => res.json(await buildControlledPolicyGraph()));
+  app.get("/api/policy/graph", async (req, res) => {
+    const auditId = String(req.query.auditId ?? "").trim();
+    if (!auditId) return res.status(400).json({ ok: false, error: "auditId is required for the policy graph." });
+    res.json(await buildControlledPolicyGraph(auditId));
+  });
   app.get("/api/policy/coverage", async (req, res) => res.json(await getControlledPolicyCoverage(String(req.query.auditId ?? ""))));
-  app.post("/api/policy/evaluate", async (req, res) => res.json(await evaluateControlledPolicy(String(req.body?.findingId ?? ""), String(req.body?.asOf ?? new Date().toISOString().slice(0, 10)))));
+  app.post("/api/policy/evaluate", async (req, res) => {
+    const auditId = String(req.body?.auditId ?? "").trim();
+    if (!auditId) return res.status(400).json({ ok: false, error: "auditId is required for policy evaluation." });
+    res.json(await evaluateControlledPolicy(String(req.body?.findingId ?? ""), String(req.body?.asOf ?? new Date().toISOString().slice(0, 10)), auditId));
+  });
   app.post("/api/policy/compile", async (req, res) => res.json(await compileControlledDocumentToPolicy(String(req.body?.documentId ?? "10-cfr-part-21"))));
   app.get("/api/ontology/storage", async (_req, res) => {
     res.json(await ontologyStorageStatus());
@@ -457,8 +546,12 @@ async function startServer() {
   }
   async function principalOrReadOnly(req: Request, auditId: string) {
     try { return await resolveRequestPrincipal(req); }
-    catch {
-      // The published demonstration allows read-only inspection without a session; every write remains authenticated.
+    catch (error) {
+      // A caller who presents a credential is asserting an identity. If that credential is
+      // invalid we must say so (401) rather than silently downgrade them to the anonymous
+      // visitor, which would mask a broken token and misstate the audit trail. Only a request
+      // with no credential at all receives the published read-only demonstration scope.
+      if (String(req.headers.authorization ?? "").trim()) throw error;
       return { id: "read-only-visitor", actor: "Read-only visitor (no session)", roleIds: [], isAdmin: false, qualified: false, access: "look_only" as const, auditIds: auditId ? [auditId] : [], auditWriteIds: [], qualifiedAuditIds: [] } as any;
     }
   }
@@ -471,7 +564,9 @@ async function startServer() {
     try {
       const principal = await resolveRequestPrincipal(req);
       res.json({ authenticated: true, principal, auditIds: principal.auditIds ?? [] });
-    } catch {
+    } catch (error) {
+      // A supplied credential that fails is a rejected identity, not an anonymous visitor.
+      if (String(req.headers.authorization ?? "").trim()) return respondWithError(res, error);
       try {
         const audits = await listAudits();
         const auditIds = (audits as any[]).map(audit => String(audit.id));
@@ -609,7 +704,8 @@ async function startServer() {
   app.get("/api/evidence/assets/:assetId/download", jsonRoute(async (req: any, res: any) => {
     const auditId = String(req.query.auditId ?? "").trim();
     if (!auditId) return res.status(400).json({ ok: false, error: "auditId is required to download evidence" });
-    const revision = req.query.revision ? Number(req.query.revision) : undefined;
+    const revision = req.query.revision === undefined ? undefined : Number(req.query.revision);
+    if (revision !== undefined && (!Number.isInteger(revision) || revision < 1)) return res.status(400).json({ ok: false, error: "revision must be a positive integer" });
     const result = await readEvidenceAsset(req.params.assetId, auditId, currentPrincipal() as any, revision);
     for (const [key, value] of Object.entries(result.headers)) res.setHeader(key, String(value));
     return res.send(Buffer.from(result.bytes));
@@ -618,11 +714,14 @@ async function startServer() {
   app.post("/api/evidence/assets/:assetId/verify", jsonRoute(async (req: any, res: any) => {
     const auditId = String(req.body?.auditId ?? req.query.auditId ?? "").trim();
     if (!auditId) return res.status(400).json({ ok: false, error: "auditId is required to verify evidence" });
-    return res.json(await verifyEvidenceAsset(req.params.assetId, auditId, currentPrincipal() as any, req.body?.revision ? Number(req.body.revision) : undefined));
+    const revision = req.body?.revision === undefined ? undefined : Number(req.body.revision);
+    if (revision !== undefined && (!Number.isInteger(revision) || revision < 1)) return res.status(400).json({ ok: false, error: "revision must be a positive integer" });
+    return res.json(await verifyEvidenceAsset(req.params.assetId, auditId, currentPrincipal() as any, revision));
   }));
 
   app.get("/api/access/grants", jsonRoute(async (_req: any, res: any) => res.json({ source: "mysql-database", grants: await listAccessGrants(currentPrincipal()) })));
   app.post("/api/access/grants", jsonRoute(async (req: any, res: any) => {
+    requireAdministrator(currentPrincipal());
     const body = req.body ?? {};
     const principalId = String(body.principalId ?? "").trim();
     const auditId = String(body.auditId ?? "").trim();
@@ -650,6 +749,7 @@ async function startServer() {
   }));
 
   app.post("/api/configuration/drafts", jsonRoute(async (req: any, res: any) => {
+    requireAdministrator(currentPrincipal());
     const body = req.body ?? {};
     const kind = String(body.kind ?? "").trim();
     const configId = String(body.configId ?? "").trim();
@@ -660,6 +760,7 @@ async function startServer() {
   }));
 
   app.post("/api/configuration/:operation(review|activate|retire)", jsonRoute(async (req: any, res: any) => {
+    requireAdministrator(currentPrincipal());
     const body = req.body ?? {};
     const kind = String(body.kind ?? "").trim();
     const configId = String(body.configId ?? "").trim();
@@ -682,8 +783,11 @@ async function startServer() {
   app.post("/api/agent/dialogue", jsonRoute(async (req: any, res: any) => {
     const body = req.body ?? {};
     const auditId = String(body.auditId ?? "").trim();
-    const message = String(body.message ?? "").trim();
+    if (typeof body.message !== "string") return res.status(400).json({ ok: false, error: "message must be a string" });
+    const message = body.message.trim();
     if (!auditId || !message) return res.status(400).json({ ok: false, error: "auditId and message are required" });
+    if (message.length > 8000) return res.status(400).json({ ok: false, error: "message exceeds the 8000 character intake limit" });
+    if (body.expectedRevision !== undefined && (!Number.isInteger(Number(body.expectedRevision)) || Number(body.expectedRevision) < 0)) return res.status(400).json({ ok: false, error: "expectedRevision must be a non-negative integer" });
     const principal = currentPrincipal();
     const result = await runFindingIntakeDialogue({
       auditId,
@@ -717,9 +821,11 @@ async function startServer() {
     // Last-resort error middleware: never answer an API request with an HTML stack trace.
     app.use((error: any, req: any, res: any, _next: any) => {
       if (res.headersSent) return;
-      const message = error instanceof Error ? error.message : "Unexpected server error";
-      console.error(`[api] ${req.method} ${req.originalUrl} failed: ${message}`);
-      res.status(500).json({ ok: false, error: message });
+      const parseFailure = error?.type === "entity.parse.failed" || (error instanceof SyntaxError && typeof (error as any)?.status === "number");
+      const message = parseFailure ? "Malformed JSON request body" : error instanceof Error ? error.message : "Unexpected server error";
+      const status = parseFailure ? 400 : typeof error?.status === "number" ? error.status : 500;
+      if (status >= 500) console.error(`[api] ${req.method} ${req.originalUrl} failed: ${message}`);
+      res.status(status).json({ ok: false, error: message });
     });
     // An unknown API path must never fall through to the SPA shell: a client asking for JSON
     // would receive HTML and report a misleading "misrouted endpoint" failure.

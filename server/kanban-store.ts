@@ -30,8 +30,10 @@ export function createKanbanService(vault: EvidenceVaultService) {
       const [items,attachments,communications] = await Promise.all([vault.deps.repository.listRecords("kanban_item",auditId),vault.deps.repository.listRecords("kanban_attachment",auditId),vault.deps.repository.listRecords("kanban_communication",auditId)]);
       return { source:"mysql-domain-records",auditId,items:items as KanbanItem[],attachments:attachments.map(a => ({ ...a,originalStatus:a.assetId ? a.originalStatus : "original_missing",storageStatus:a.assetId ? a.storageStatus : "original_missing" })) as KanbanAttachment[],communications:communications as KanbanCommunication[] };
     },
-    async createKanbanItem(input:KanbanCreateInput) {
-      await vault.authorize(input.auditId,"write",{ id:required(input.createdBy,"createdBy") });
+    async createKanbanItem(input:KanbanCreateInput, principal?:EvidencePrincipal) {
+      const actor = principal?.id ?? required(input.createdBy,"createdBy");
+      await vault.authorize(input.auditId,"write",principal ?? { id:actor });
+      if (typeof input.title !== "string") throw new Error("title must be a string");
       required(input.title,"title");
       if (input.status && !statuses.includes(input.status)) throw new Error("Invalid Kanban status");
       if (input.status === "final") throw new Error("New items cannot manufacture final approval");
@@ -50,9 +52,9 @@ export function createKanbanService(vault: EvidenceVaultService) {
         return { ok:true,item,event,source:"mysql-domain-records" };
       });
     },
-    async moveKanbanItem(itemId:string,status:KanbanStatus,actor:string,auditId?:string,expectedRevision?:number,reason?:string) {
+    async moveKanbanItem(itemId:string,status:KanbanStatus,actor:string,auditId?:string,expectedRevision?:number,reason?:string,principal?:EvidencePrincipal) {
       required(auditId,"auditId"); required(actor,"actor");
-      await vault.authorize(auditId!,"write",{ id:actor });
+      await vault.authorize(auditId!,"write",principal ?? { id:actor });
       if (!statuses.includes(status)) throw new Error("Invalid Kanban status");
       if (status === "final") throw new Error("Finalization requires the parent's persisted qualified report-approval path; direct card finalization is disabled");
       return vault.deps.repository.transaction(async tx => {
@@ -62,8 +64,8 @@ export function createKanbanService(vault: EvidenceVaultService) {
         return { ok:true,item:updated,event,source:"mysql-domain-records" };
       });
     },
-    async appendKanbanCommunication(input:KanbanCommunicationInput) {
-      const principal = await vault.authorize(input.auditId,"write",{ id:required(input.actor,"actor") });
+    async appendKanbanCommunication(input:KanbanCommunicationInput, authenticated?:EvidencePrincipal) {
+      const principal = await vault.authorize(input.auditId,"write",authenticated ?? { id:required(input.actor,"actor") });
       required(input.text,"text");
       if (!["user","agent","system"].includes(input.role)) throw new Error("Invalid communication role");
       if (input.skillRevisions?.some(s => !input.skillIds.includes(s.id) || !s.revision)) throw new Error("Skill revision must identify an applied input skill");
@@ -80,8 +82,8 @@ export function createKanbanService(vault: EvidenceVaultService) {
         return { ok:true,communication,item:updated,event,source:"mysql-domain-records" };
       });
     },
-    async attachKanbanAsset(input:KanbanAssetInput) {
-      await vault.authorize(input.auditId,"write",{ id:required(input.createdBy,"createdBy") });
+    async attachKanbanAsset(input:KanbanAssetInput, principal?:EvidencePrincipal) {
+      await vault.authorize(input.auditId,"write",principal ?? { id:required(input.createdBy,"createdBy") });
       required(input.filename,"filename"); required(input.mediaType,"mediaType");
       if (!["photo","document","voice"].includes(input.kind)) throw new Error("Invalid attachment kind");
       const result = await vault.deps.repository.transaction(async tx => {
@@ -120,8 +122,8 @@ export function createKanbanService(vault: EvidenceVaultService) {
   };
 }
 export const listKanbanItems = (auditId:string,principal?:EvidencePrincipal) => createKanbanService(getEvidenceRuntime()).listKanbanItems(auditId,principal);
-export const createKanbanItem = (input:KanbanCreateInput) => createKanbanService(getEvidenceRuntime()).createKanbanItem(input);
+export const createKanbanItem = (input:KanbanCreateInput, principal?:EvidencePrincipal) => createKanbanService(getEvidenceRuntime()).createKanbanItem(input, principal);
 /** Legacy 3-argument calls remain import-compatible but throw: explicit audit scope is mandatory. */
-export const moveKanbanItem = (itemId:string,status:KanbanStatus,actor:string,auditId?:string,expectedRevision?:number,reason?:string) => createKanbanService(getEvidenceRuntime()).moveKanbanItem(itemId,status,actor,auditId,expectedRevision,reason);
-export const appendKanbanCommunication = (input:KanbanCommunicationInput) => createKanbanService(getEvidenceRuntime()).appendKanbanCommunication(input);
-export const attachKanbanAsset = (input:KanbanAssetInput) => createKanbanService(getEvidenceRuntime()).attachKanbanAsset(input);
+export const moveKanbanItem = (itemId:string,status:KanbanStatus,actor:string,auditId?:string,expectedRevision?:number,reason?:string,principal?:EvidencePrincipal) => createKanbanService(getEvidenceRuntime()).moveKanbanItem(itemId,status,actor,auditId,expectedRevision,reason,principal);
+export const appendKanbanCommunication = (input:KanbanCommunicationInput, principal?:EvidencePrincipal) => createKanbanService(getEvidenceRuntime()).appendKanbanCommunication(input, principal);
+export const attachKanbanAsset = (input:KanbanAssetInput, principal?:EvidencePrincipal) => createKanbanService(getEvidenceRuntime()).attachKanbanAsset(input, principal);

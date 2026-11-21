@@ -14,9 +14,12 @@ export const evidenceReportCitationTemplates = [
 
 export function createEvidenceService(vault:EvidenceVaultService) {
   return {
-    async registerEvidence(input:RegisterEvidenceInput) {
+    async registerEvidence(input:RegisterEvidenceInput, principal?:EvidencePrincipal) {
       const auditId = required(input.auditId,"auditId"); const actor = required(input.actor,"actor"); const findingId = required(input.linkedFinding,"linkedFinding");
-      await vault.authorize(auditId,"write",{ id:actor });
+      // Authorize against the caller's full principal. A bare { id } stub has no audit scope and
+      // would make the authorization check itself fail, which is how an unknown audit turned
+      // into a 500 instead of a clean 404.
+      await vault.authorize(auditId,"write",principal);
       if (!input.contentBase64) return { ok:false,error:"A document payload is required." };
       const bytes = decodeEvidenceBase64(input.contentBase64);
       if (input.size !== undefined && input.size !== bytes.length) throw new Error("Declared size does not match original bytes");
@@ -49,6 +52,6 @@ export function createEvidenceService(vault:EvidenceVaultService) {
     },
   };
 }
-export const registerEvidence = (input:RegisterEvidenceInput) => createEvidenceService(getEvidenceRuntime()).registerEvidence(input);
+export const registerEvidence = (input:RegisterEvidenceInput, principal?:EvidencePrincipal) => createEvidenceService(getEvidenceRuntime()).registerEvidence(input, principal);
 export const listEvidence = (auditId:string,principal?:EvidencePrincipal) => createEvidenceService(getEvidenceRuntime()).listEvidence(auditId,principal);
 export const getReportDraft = (findingId?:string,auditId?:string,principal?:EvidencePrincipal) => createEvidenceService(getEvidenceRuntime()).getReportDraft(findingId,auditId,principal);
