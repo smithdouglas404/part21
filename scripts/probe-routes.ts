@@ -25,7 +25,8 @@ const probes: Probe[] = [
   { method: "GET", path: `/api/kanban?auditId=${auditId}`, expect: [200] },
   { method: "GET", path: `/api/evidence/assets/ASSET-DOES-NOT-EXIST/download?auditId=${auditId}`, expect: [404, 400] },
   { method: "POST", path: "/api/evidence/assets/ASSET-DOES-NOT-EXIST/verify", body: { auditId }, expect: [404, 400] },
-  { method: "POST", path: "/api/regulatory/ingest", body: { sourceId: "probe", sourceAsOf: "2026-11-20" }, expect: [403] },
+  // Missing sourceId is a validation failure for an administrator and a 403 for an auditor.
+  { method: "POST", path: "/api/regulatory/ingest", body: {}, expect: [400, 403] },
   { method: "POST", path: "/api/configuration/review", body: { kind: "skill", configId: "probe", version: "1.0.0" }, expect: [400] },
   { method: "POST", path: "/api/domain/audits", body: { title: "probe" }, expect: [400] },
   { method: "POST", path: "/api/agent/dialogue", body: { auditId, message: "Which evidence is still missing for finding F-042?" }, expect: [200] },

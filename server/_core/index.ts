@@ -128,7 +128,18 @@ async function startServer() {
   });
 
   app.get("/api/domain/status", async (_req, res) => res.json(await getDomainStoreStatus()));
-  app.get("/api/domain/audits", async (_req, res) => res.json({ source: "mysql-database", audits: await listAudits() }));
+  app.get("/api/domain/audits", async (_req, res) => {
+    const audits = await listAudits();
+    // Authorization is resolved from the database on every request, so a grant issued after the
+    // browser loaded its session is visible on the next register refresh. Returning the whole
+    // register and hiding rows client-side made a stale session look like an empty portfolio.
+    let principal: ReturnType<typeof currentPrincipal> | null = null;
+    try { principal = currentPrincipal(); } catch { principal = null; }
+    const visible = principal && !principal.isAdmin
+      ? audits.filter((audit: any) => principal!.auditIds.includes(String(audit.id)))
+      : audits;
+    return res.json({ source: "mysql-database", audits: visible, authorized: Boolean(principal), total: audits.length });
+  });
   // Governed audit profiles come from the controlled configuration table, never from fixtures.
   // The launch screen needs this before an audit exists, so it is not audit-scoped.
   app.get("/api/nuclear/profiles", async (_req, res) => {

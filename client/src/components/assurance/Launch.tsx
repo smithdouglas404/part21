@@ -178,13 +178,9 @@ export function Launch({
   refreshAudits: () => void;
 }) {
   const [create, setCreate] = useState(false);
-  const auditRows = rows(audits.data, "audits").filter(
-    audit =>
-      principal.isAdmin ||
-      !Array.isArray(principal.auditIds) ||
-      principal.auditIds.includes(id(audit)) ||
-      principal.auditIds.includes(String(audit.auditId ?? ""))
-  );
+  // The register is already scoped by the server, so the screen reflects grants immediately
+  // instead of re-filtering against a session snapshot captured at sign-in.
+  const auditRows = rows(audits.data, "audits");
   const chosen = auditRows.find(a => id(a) === selectedAudit);
   const lens = personas.data.find(p => id(p) === selectedLens);
   return (

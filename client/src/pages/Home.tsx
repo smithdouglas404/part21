@@ -44,13 +44,9 @@ function AuthenticatedHome({
     () => storageGet(`${prefix}:entered`) === "true"
   );
   const [admin, setAdmin] = useState(false);
-  const list = rows(audits.data, "audits").filter(
-    row =>
-      principal.isAdmin ||
-      !Array.isArray(principal.auditIds) ||
-      principal.auditIds.includes(id(row)) ||
-      principal.auditIds.includes(String(row.auditId ?? ""))
-  );
+  // The server filters the register by the caller's persisted grants on every request. Filtering
+  // again from the session snapshot hid audits granted after the page loaded.
+  const list = rows(audits.data, "audits");
   const validAudit = list.some(row => id(row) === auditId);
   const validLens = personas.data.some(row => id(row) === lensId);
   const onAudit = (value: string) => {
