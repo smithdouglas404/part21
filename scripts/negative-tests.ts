@@ -189,7 +189,9 @@ add("http", "malformed JSON is rejected as a client error", "POST", "/api/domain
 add("http", "text/plain body is not parsed as JSON", "POST", "/api/domain/audits", [400], { raw: JSON.stringify(audit), contentType: "text/plain" });
 add("http", "null transport body is rejected", "POST", "/api/domain/audits", [400], { raw: "null", contentType: "application/json" });
 add("http", "array transport body is rejected", "POST", "/api/domain/audits", [400], { raw: "[]", contentType: "application/json" });
-add("http", "null byte in path is refused", "GET", "/api/kanban%00", [400, 404]);
+// A null byte in the request target may be refused by the CDN edge before the application
+  // sees it, so this case asserts refusal status only (an HTML 400 is still a refusal).
+  add("http", "null byte in path is refused", "GET", "/api/kanban%00", [400, 404], { json: false });
 add("http", "encoded traversal in asset path is refused", "GET", `/api/evidence/assets/%2e%2e%2f%2e%2e%2fetc%2fpasswd/download?auditId=${auditId}`, [404]);
 add("http", "double-encoded traversal is refused", "GET", `/api/evidence/assets/%252e%252e%252fetc%252fpasswd/download?auditId=${auditId}`, [404]);
 add("http", "8k query string does not cause a server error", "GET", `/api/kanban?auditId=${"A".repeat(8000)}`, [400, 404]);
