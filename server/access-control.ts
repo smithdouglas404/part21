@@ -51,13 +51,22 @@ export function requireQualifiedReviewer(principal: AssurancePrincipal, auditId:
 }
 async function applyGrants(base: AssurancePrincipal): Promise<AssurancePrincipal> {
   const grants = (await listDomainRecords<AuditAccessGrant>("access_grant")).filter(g => g.active && g.principalId === base.id);
+  // The auditor who opened an engagement is accountable for it, so ownership confers scope even
+  // before an administrator issues an explicit grant. Connector tokens never gain this: their
+  // scope must remain exactly the audit the token was minted for.
+  const owned = base.id.startsWith("connector:")
+    ? []
+    : (await listDomainRecords<any>("audit"))
+      .filter(audit => audit.ownerPrincipalId === base.id || audit.ownerOpenId === base.id || (!!base.actor && audit.owner === base.actor))
+      .map(audit => String(audit.id));
+  const scoped = [...new Set([...base.auditIds, ...owned])];
   const qualified = grants.filter(g => g.personId && g.qualificationEvidenceId && g.qualifiedUntil && Date.parse(g.qualifiedUntil) > Date.now());
   const personIds = [...new Set(qualified.map(g => g.personId))];
   return {
     ...base,
-    auditIds: [...new Set([...base.auditIds, ...grants.map(g => g.auditId)])],
+    auditIds: [...new Set([...scoped, ...grants.map(g => g.auditId)])],
     roleIds: [...new Set([...base.roleIds, ...grants.flatMap(g => g.roleIds)])],
-    auditWriteIds: base.access === "make_changes" ? [...new Set([...base.auditIds, ...grants.filter(g => g.access === "make_changes").map(g => g.auditId)])] : [],
+    auditWriteIds: base.access === "make_changes" ? [...new Set([...scoped, ...grants.filter(g => g.access === "make_changes").map(g => g.auditId)])] : [],
     qualifiedAuditIds: qualified.map(g => g.auditId),
     // A read-only bearer token can never be upgraded by a database role grant.
     access: base.access,

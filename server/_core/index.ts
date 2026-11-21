@@ -1,6 +1,7 @@
 import "dotenv/config";
 import { listAuditAlerts, raiseAuditAlerts, acknowledgeAuditAlert } from "../alerts";
 import { deliverAlertWebhook, listAlertDeliveries, webhookConfiguration } from "../alert-webhook";
+import crypto from "node:crypto";
 import express from "express";
 import type { Request, Response } from "express";
 import { createServer } from "http";
@@ -16,8 +17,8 @@ import { listApprovalRules } from "../approval-rules";
 import { appendKanbanCommunication, attachKanbanAsset, createKanbanItem, listKanbanItems, moveKanbanItem } from "../kanban-store";
 import { ontologyStorageStatus, syncOntologySnapshot } from "../ontology-store";
 import { getReportDraft, registerEvidence } from "../evidence";
-import { assessControlledRemediationImpact, getControlledRegulatoryPack, traverseControlledRegulatoryTree } from "../regulatory-runtime";
-import { acknowledgeComplianceWarning, answerGroundedQuestion, answerLiveGroundedQuestion, configureAiProvider, getAiStatus } from "../ai";
+import { assessControlledRemediationImpact, getAuditProfiles, getControlledRegulatoryPack, traverseControlledRegulatoryTree } from "../regulatory-runtime";
+import { acknowledgeComplianceWarning, answerGroundedQuestion, answerLiveGroundedQuestion, configureAiProvider, getAiStatus, runFindingIntakeDialogue } from "../ai";
 import { getEccCatalog, getEmbeddedEccModule } from "../../shared/ecc";
 import { decideGovernanceItem, getGovernanceBoard, moveGovernanceItem } from "../../shared/governance";
 import { controlAgent, getAgentRegistry } from "../agent-runtime";
@@ -31,7 +32,7 @@ import { runWeeklySourceSync } from "../weekly-sync";
 import { callConnectedTool, createConnectToken, listConnectTokens, revokeConnectToken } from "../connect-api";
 import { generateSyntheticPart21Decision, getDocumentControlStatus, listControlledDocuments, notarizeDocumentWithHederaDemo, registerControlledDocument, reviewDocumentCybersecurity } from "../document-control";
 import { getGroundedGraphContext, getGraphStoreStatus, validateGraphOntology } from "../graph-store";
-import { getDomainPortfolio, getDomainStoreStatus, listAudits } from "../domain-store";
+import { getDomainPortfolio, getDomainStoreStatus, listAudits, writeDomainRecordWithEvent } from "../domain-store";
 import { getConfigurationStoreStatus, getControlledConfiguration, listControlledConfigurations, listControlledConfigurationPayloads } from "../config-store";
 import { getMergedStudioOpenApi, getStudioGatewayStatus, studioProxyMiddleware } from "../studio-gateway";
 import { resolveRequestPrincipal, AssuranceAccessError, runAsPrincipal, currentPrincipal, assertAuditPermission } from "../access-control";
@@ -44,7 +45,10 @@ import { deleteUserConnector, getMuseSettings, getUserConnectorStatus, museReadi
 import { createPart21CaseRecord, getPart21Case, listPart21Cases, part21ClockBrief, part21ProcessReference, recordPart21Fact } from "../part21-case";
 import { listDomainRecords } from "../domain-store";
 import { verifyProcessCitations, verifyProcessModelCoverage } from "../part21-citation-verify";
-import { listSourceSnapshots, getRegulatorySnapshot } from "../regulatory-source";
+import { ingestEcfrSource, listSourceSnapshots, getRegulatorySnapshot } from "../regulatory-source";
+import { getEvidenceVaultStatus, readEvidenceAsset, verifyEvidenceAsset } from "../evidence-vault";
+import { issueAccessGrant, listAccessGrants } from "../access-control";
+import { activateConfigurationVersion, proposeConfigurationVersion, retireConfigurationVersion, reviewConfigurationVersion } from "../config-governance";
 
 import { createContext } from "./context";
 import { serveStatic, setupVite } from "./vite";
@@ -125,6 +129,63 @@ async function startServer() {
 
   app.get("/api/domain/status", async (_req, res) => res.json(await getDomainStoreStatus()));
   app.get("/api/domain/audits", async (_req, res) => res.json({ source: "mysql-database", audits: await listAudits() }));
+  // Governed audit profiles come from the controlled configuration table, never from fixtures.
+  // The launch screen needs this before an audit exists, so it is not audit-scoped.
+  app.get("/api/nuclear/profiles", async (_req, res) => {
+    try { res.json(await getAuditProfiles()); }
+    catch (error) { res.status(502).json({ error: error instanceof Error ? error.message : "Governed audit profiles are unavailable." }); }
+  });
+  app.post("/api/domain/audits", async (req, res) => {
+    try {
+      const principal = currentPrincipal();
+      // Creating an audit is an ordinary auditor activity, not an administrative one. A
+      // look-only principal may read the register but must not open a new engagement.
+      if (principal.access !== "make_changes") throw new AssuranceAccessError("Look-only access cannot create an audit.", 403);
+      const title = String(req.body?.title ?? "").trim();
+      const scope = String(req.body?.scope ?? "").trim();
+      const due = String(req.body?.due ?? "").trim();
+      const profileId = String(req.body?.profileId ?? "").trim();
+      const requestedStandard = String(req.body?.standard ?? "").trim();
+      if (!title || !scope || !due || !profileId) return res.status(400).json({ error: "title, scope, due and profileId are required." });
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(due) || Number.isNaN(Date.parse(due))) return res.status(400).json({ error: "due must be an ISO date (YYYY-MM-DD)." });
+      const { profiles } = await getAuditProfiles();
+      const profile = profiles.find(item => item.id === profileId);
+      if (!profile) return res.status(400).json({ error: `Unknown governed audit profile ${profileId}.` });
+      if (profile.status !== "active") return res.status(409).json({ error: `Audit profile ${profileId} is ${profile.status}; only an active profile may scope a new audit.` });
+      const standard = requestedStandard || String((profile as any).standard ?? "").trim();
+      if (!standard) return res.status(400).json({ error: "An applicable standard is required; the selected profile does not declare one." });
+      const existing = await listAudits();
+      const highest = existing.reduce((max: number, audit: any) => {
+        const match = /^AUD-(\d+)$/.exec(String(audit.id ?? ""));
+        return match ? Math.max(max, Number(match[1])) : max;
+      }, 0);
+      const formattedDue = new Date(`${due}T00:00:00Z`).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric", timeZone: "UTC" });
+      for (let attempt = 1; attempt <= 5; attempt += 1) {
+        const auditId = `AUD-${String(highest + attempt).padStart(3, "0")}`;
+        const payload = {
+          id: auditId, title, scope, standard, due: formattedDue, dueDate: due,
+          status: "Planned", owner: principal.actor, ownerPrincipalId: principal.id, progress: 0, findings: 0, evidence: "0 / 0 linked",
+          auditProfileId: profile.id, auditProfileVersion: profile.version, auditProfileTitle: profile.title,
+          regulationSets: (profile as any).regulationSets ?? [], requiredProvisionIds: (profile as any).requiredProvisionIds ?? [],
+          createdAt: new Date().toISOString(), createdBy: principal.actor,
+        };
+        try {
+          const written = await writeDomainRecordWithEvent(
+            { recordType: "audit", recordId: auditId, auditId, payload },
+            { expectedRevision: 0, actor: principal.id, createOnly: true },
+            { id: `EVT-${crypto.randomUUID()}`, type: "audit.created", actor: principal.id, auditId, entityId: auditId, payload: { title, scope, standard, dueDate: due, auditProfileId: profile.id, auditProfileVersion: profile.version, source: "launch-screen" } },
+          );
+          return res.status(201).json({ source: "mysql-database", audit: { ...payload, recordId: auditId, auditId, revision: written.record.revision } });
+        } catch (error) {
+          if (attempt === 5) throw error;
+        }
+      }
+      return res.status(409).json({ error: "Audit identifier allocation collided five times; refresh the register and retry." });
+    } catch (error) {
+      const status = error instanceof AssuranceAccessError ? error.status : 500;
+      return res.status(status).json({ error: error instanceof Error ? error.message : "Audit creation failed." });
+    }
+  });
   app.get("/api/domain/portfolio", async (req, res) => res.json(await getDomainPortfolio(typeof req.query.auditId === "string" ? req.query.auditId : "")));
   app.get("/api/configuration/status", async (_req, res) => res.json(await getConfigurationStoreStatus()));
   app.get("/api/configuration/catalog", async (req, res) => res.json({ source: "mysql-database", configurations: await listControlledConfigurations(typeof req.query.kind === "string" ? req.query.kind as any : undefined) }));
@@ -260,12 +321,18 @@ async function startServer() {
     catch (error) {
       if (res.headersSent) return;
       const message = error instanceof Error ? error.message : "Request failed";
+      const explicit = typeof (error as any)?.status === "number" ? Number((error as any).status) : undefined;
       const unavailable = /not configured|unavailable|not available/i.test(message);
-      res.status(unavailable ? 503 : 500).json({ ok: false, error: message });
+      const missing = /not found|does not exist|no such/i.test(message);
+      res.status(explicit ?? (missing ? 404 : unavailable ? 503 : 500)).json({ ok: false, error: message });
     }
   };
 
-  app.get("/api/kanban", jsonRoute(async (req: any, res: any) => res.json(await listKanbanItems(String(req.query.auditId ?? "")))));
+  app.get("/api/kanban", jsonRoute(async (req: any, res: any) => {
+    const auditId = String(req.query.auditId ?? "").trim();
+    if (!auditId) return res.status(400).json({ ok: false, error: "auditId is required to list Kanban items" });
+    return res.json(await listKanbanItems(auditId));
+  }));
   app.post("/api/kanban/items", jsonRoute(async (req: any, res: any) => res.json(await createKanbanItem(req.body ?? {}))));
   app.post("/api/kanban/items/:itemId/move", jsonRoute(async (req: any, res: any) => res.json(await moveKanbanItem(req.params.itemId, req.body?.status, String(req.body?.actor ?? "Field operator")))));
   app.post("/api/kanban/items/:itemId/attachments", jsonRoute(async (req: any, res: any) => res.json(await attachKanbanAsset({ ...(req.body ?? {}), itemId: req.params.itemId }))));
@@ -509,6 +576,120 @@ async function startServer() {
       res.json({ ...verifyProcessCitations(snapshot), modelCoverage: verifyProcessModelCoverage(snapshot) });
     } catch (error) { res.status(503).json({ ok: false, error: error instanceof Error ? error.message : "Citation verification unavailable" }); }
   });
+  app.post("/api/regulatory/ingest", jsonRoute(async (req: any, res: any) => {
+    const principal = currentPrincipal();
+    if (!principal.isAdmin) return res.status(403).json({ ok: false, error: "Only an administrator may ingest a controlled eCFR source snapshot." });
+    const body = req.body ?? {};
+    const sourceId = String(body.sourceId ?? "").trim();
+    const regulationSet = String(body.regulationSet ?? "10-cfr-part-21");
+    const sourceAsOf = String(body.sourceAsOf ?? "").trim();
+    if (!sourceId) return res.status(400).json({ ok: false, error: "sourceId is required" });
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(sourceAsOf)) return res.status(400).json({ ok: false, error: "sourceAsOf must be an ISO date (YYYY-MM-DD)" });
+    const result = await ingestEcfrSource({ sourceId, regulationSet: regulationSet as any, sourceAsOf });
+    return res.json(result);
+  }));
+
+  app.get("/api/evidence/vault/status", jsonRoute(async (req: any, res: any) => {
+    const auditId = String(req.query.auditId ?? "").trim();
+    if (!auditId) return res.status(400).json({ ok: false, error: "auditId is required for evidence vault status" });
+    return res.json(await getEvidenceVaultStatus(auditId, currentPrincipal() as any));
+  }));
+
+  app.get("/api/evidence/assets/:assetId/download", jsonRoute(async (req: any, res: any) => {
+    const auditId = String(req.query.auditId ?? "").trim();
+    if (!auditId) return res.status(400).json({ ok: false, error: "auditId is required to download evidence" });
+    const revision = req.query.revision ? Number(req.query.revision) : undefined;
+    const result = await readEvidenceAsset(req.params.assetId, auditId, currentPrincipal() as any, revision);
+    for (const [key, value] of Object.entries(result.headers)) res.setHeader(key, String(value));
+    return res.send(Buffer.from(result.bytes));
+  }));
+
+  app.post("/api/evidence/assets/:assetId/verify", jsonRoute(async (req: any, res: any) => {
+    const auditId = String(req.body?.auditId ?? req.query.auditId ?? "").trim();
+    if (!auditId) return res.status(400).json({ ok: false, error: "auditId is required to verify evidence" });
+    return res.json(await verifyEvidenceAsset(req.params.assetId, auditId, currentPrincipal() as any, req.body?.revision ? Number(req.body.revision) : undefined));
+  }));
+
+  app.get("/api/access/grants", jsonRoute(async (_req: any, res: any) => res.json({ source: "mysql-database", grants: await listAccessGrants(currentPrincipal()) })));
+  app.post("/api/access/grants", jsonRoute(async (req: any, res: any) => {
+    const body = req.body ?? {};
+    const principalId = String(body.principalId ?? "").trim();
+    const auditId = String(body.auditId ?? "").trim();
+    if (!principalId || !auditId) return res.status(400).json({ ok: false, error: "principalId and auditId are required" });
+    if (!Array.isArray(body.roleIds) || !body.roleIds.length) return res.status(400).json({ ok: false, error: "roleIds must list at least one governed role" });
+    const grant = await issueAccessGrant({
+      principalId,
+      auditId,
+      roleIds: body.roleIds.map(String),
+      access: body.access === "look_only" ? "look_only" : "make_changes",
+      personId: body.personId ? String(body.personId) : undefined,
+      qualificationEvidenceId: body.qualificationEvidenceId ? String(body.qualificationEvidenceId) : undefined,
+      qualifiedUntil: body.qualifiedUntil ? String(body.qualifiedUntil) : undefined,
+    } as any, currentPrincipal());
+    return res.json(grant);
+  }));
+
+  app.get("/api/configuration/drafts", jsonRoute(async (req: any, res: any) => {
+    const kind = typeof req.query.kind === "string" ? req.query.kind : undefined;
+    // Read the persisted controlled catalog directly. The governance service adds review,
+    // separation-of-duties and qualification gates on writes; listing drafts needs only the rows.
+    const rows = await listControlledConfigurations(kind as any);
+    const drafts = rows.filter((row: any) => row.status === "draft");
+    return res.json({ source: "mysql-database-controlled-configuration", drafts, governanceReviewConfigured: false });
+  }));
+
+  app.post("/api/configuration/drafts", jsonRoute(async (req: any, res: any) => {
+    const body = req.body ?? {};
+    const kind = String(body.kind ?? "").trim();
+    const configId = String(body.configId ?? "").trim();
+    const version = String(body.version ?? "").trim();
+    if (!kind || !configId || !version) return res.status(400).json({ ok: false, error: "kind, configId and version are required" });
+    if (body.payload === undefined) return res.status(400).json({ ok: false, error: "payload is required" });
+    return res.json(await proposeConfigurationVersion(currentPrincipal() as any, { kind: kind as any, configId, version, payload: body.payload }));
+  }));
+
+  app.post("/api/configuration/:operation(review|activate|retire)", jsonRoute(async (req: any, res: any) => {
+    const body = req.body ?? {};
+    const kind = String(body.kind ?? "").trim();
+    const configId = String(body.configId ?? "").trim();
+    const version = String(body.version ?? "").trim();
+    if (!kind || !configId || !version) return res.status(400).json({ ok: false, error: "kind, configId and version are required" });
+    const principal = currentPrincipal() as any;
+    const operation = req.params.operation;
+    if (operation === "review") {
+      const missing = ["expectedSha256", "action", "disposition", "rationale", "acceptanceEvidenceIds"].filter(key => body[key] === undefined || (Array.isArray(body[key]) && !body[key].length));
+      if (missing.length) return res.status(400).json({ ok: false, error: `Configuration review requires ${missing.join(", ")}. A reviewer must cite retained acceptance evidence and the exact draft digest.`, required: missing });
+      return res.json(await reviewConfigurationVersion(principal, { kind: kind as any, configId, version, expectedSha256: String(body.expectedSha256), action: body.action, disposition: body.disposition, rationale: String(body.rationale), acceptanceEvidenceIds: body.acceptanceEvidenceIds.map(String) }));
+    }
+    if (operation === "activate") {
+      if (!body.approvalId) return res.status(400).json({ ok: false, error: "Activation requires the recorded approvalId from a completed review." });
+      return res.json(await activateConfigurationVersion(principal, { kind: kind as any, configId, version, approvalId: String(body.approvalId), expectedSha256: body.expectedSha256 ? String(body.expectedSha256) : undefined, expectedActiveVersion: body.expectedActiveVersion ? String(body.expectedActiveVersion) : null } as any));
+    }
+    return res.json(await retireConfigurationVersion(principal, { kind: kind as any, configId, version, approvalId: body.approvalId ? String(body.approvalId) : undefined, rationale: String(body.rationale ?? "") } as any));
+  }));
+
+  app.post("/api/agent/dialogue", jsonRoute(async (req: any, res: any) => {
+    const body = req.body ?? {};
+    const auditId = String(body.auditId ?? "").trim();
+    const message = String(body.message ?? "").trim();
+    if (!auditId || !message) return res.status(400).json({ ok: false, error: "auditId and message are required" });
+    const principal = currentPrincipal();
+    const result = await runFindingIntakeDialogue({
+      auditId,
+      message,
+      findingId: body.findingId ? String(body.findingId) : undefined,
+      itemId: body.itemId ? String(body.itemId) : undefined,
+      conversationId: body.conversationId ? String(body.conversationId) : undefined,
+      expectedRevision: body.expectedRevision === undefined ? undefined : Number(body.expectedRevision),
+      finalize: body.finalize === true,
+      draftTitle: body.draftTitle ? String(body.draftTitle) : undefined,
+      draftDescription: body.draftDescription ? String(body.draftDescription) : undefined,
+      approvalDecisionId: body.approvalDecisionId ? String(body.approvalDecisionId) : undefined,
+      principal: { ...principal, auditIds: [auditId], auditWriteIds: [auditId] } as any,
+    } as any);
+    return res.json(result);
+  }));
+
   registerOAuthRoutes(app);
   // tRPC API
   app.use(
