@@ -273,7 +273,17 @@ export async function buildAuditReadinessReport(auditId?: string, services = cre
   if (!auditId) throw new Error("auditId is required.");
   const portfolio = await services.portfolio(auditId);
   if (portfolio.audit?.id !== auditId) throw new Error("Audit scope mismatch.");
-  return { reportType: "audit-readiness", reportVersion: "1.0-draft", generatedAt: services.now(), dataMode: "mysql-database", audit: portfolio.audit, executivePosition: "Qualified review required", metrics: portfolio.metrics, controls: portfolio.controls, findings: portfolio.findings, evidence: portfolio.evidence, sources: portfolio.sources, agentRecommendation: "Review the persisted evidence, policy results, and unresolved questions; this draft has no approved readiness or regulatory disposition.", humanDecisionsRequired: ["Confirm scope", "Accept evidence sufficiency", "Approve finding severity", "Approve report disposition"], traceabilityNote: "Draft database projection; not a compliance certification or regulatory determination." };
+  const storedMetrics = (portfolio.metrics ?? {}) as Record<string, any>;
+  const openFindings = portfolio.findings.filter(finding => !/closed|verified|approved/i.test(String(finding.status ?? "")));
+  const metrics = {
+    readiness: storedMetrics.readiness ?? null,
+    readinessDelta: storedMetrics.readinessDelta ?? null,
+    openFindings: openFindings.length,
+    criticalFindings: openFindings.filter(finding => /critical/i.test(String(finding.severity ?? ""))).length,
+    supplierExposure: portfolio.suppliers.length,
+    changes30d: portfolio.changes.length,
+  };
+  return { reportType: "audit-readiness", reportVersion: "1.0-draft", generatedAt: services.now(), dataMode: "mysql-database", audit: portfolio.audit, executivePosition: "Qualified review required", metrics, controls: portfolio.controls, findings: portfolio.findings, evidence: portfolio.evidence, suppliers: portfolio.suppliers, changes: portfolio.changes, sources: portfolio.sources, agentRecommendation: "Review the persisted evidence, policy results, and unresolved questions; this draft has no approved readiness or regulatory disposition.", humanDecisionsRequired: ["Confirm scope", "Accept evidence sufficiency", "Approve finding severity", "Approve report disposition"], traceabilityNote: "Draft database projection; not a compliance certification or regulatory determination." };
 }
 export function reportToCsv(report: Awaited<ReturnType<typeof buildAuditReadinessReport>>) {
   const rows: unknown[][] = [["Report type", report.reportType], ["Report version", report.reportVersion], ["Generated at", report.generatedAt], ["Audit", report.audit.id], ["Executive position", report.executivePosition], ["Readiness", report.metrics?.readiness ?? "Unknown"], ["Traceability note", report.traceabilityNote], [], ["Finding ID", "Title", "Severity", "Status", "Owner"], ...report.findings.map(row => [row.id, row.title, row.severity, row.status, row.owner])];

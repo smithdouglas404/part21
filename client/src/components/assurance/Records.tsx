@@ -283,9 +283,17 @@ function ReadinessNarrative({ report }: { report: Row }) {
   const metrics = report.metrics ?? {};
   const findings = Array.isArray(report.findings) ? report.findings : [];
   const controls = Array.isArray(report.controls) ? report.controls : [];
+  const suppliers = Array.isArray(report.suppliers) ? report.suppliers : [];
+  const changes = Array.isArray(report.changes) ? report.changes : [];
   const decisions = Array.isArray(report.humanDecisionsRequired)
     ? report.humanDecisionsRequired
     : [];
+  const openFindings = findings.filter(
+    finding => !/closed|verified|approved/i.test(String(finding.status ?? ""))
+  ).length;
+  const criticalFindings = findings.filter(
+    finding => /critical/i.test(String(finding.severity ?? ""))
+  ).length;
   return (
     <article className="readiness-report">
       <header className="readiness-report-head">
@@ -324,8 +332,8 @@ function ReadinessNarrative({ report }: { report: Row }) {
         </div>
         <div>
           <span>Open findings</span>
-          <strong>{text(metrics.openFindings, String(findings.length))}</strong>
-          <small>{text(metrics.criticalFindings, "0")} critical</small>
+          <strong>{openFindings}</strong>
+          <small>{criticalFindings} critical</small>
         </div>
         <div>
           <span>Evidence linked</span>
@@ -334,8 +342,8 @@ function ReadinessNarrative({ report }: { report: Row }) {
         </div>
         <div>
           <span>Supplier exposure</span>
-          <strong>{text(metrics.supplierExposure, "0")}</strong>
-          <small>{text(metrics.changes30d, "0")} changes in 30 days</small>
+          <strong>{suppliers.length}</strong>
+          <small>{changes.length} recorded changes</small>
         </div>
       </section>
       <section>

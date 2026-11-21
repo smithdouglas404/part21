@@ -453,6 +453,40 @@
   color: #45667e;
   font-family: "IBM Plex Mono", monospace;
 }
+.muted-copy {
+  margin: 0 0 10px;
+  color: #8da6b5;
+  font-size: 12px;
+  line-height: 1.5;
+}
+.run-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 8px;
+}
+.run-summary {
+  display: grid;
+  gap: 4px;
+  padding: 10px;
+  border: 1px solid #244157;
+  border-radius: 6px;
+  background: #0d1c2a;
+}
+.run-summary > div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.run-summary strong {
+  color: #dcebf3;
+  font-size: 12.5px;
+}
+.run-summary small {
+  color: #829faa;
+  font-size: 10.5px;
+  line-height: 1.45;
+}
 .assurance-approval {
   margin-top: 12px;
   padding: 12px;

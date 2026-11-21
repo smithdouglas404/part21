@@ -210,22 +210,6 @@ export const mcpTools: McpToolDefinition[] = [
   { name: "field_kanban_attach", group: "Field engagement", description: "Attach a photo, document, or voice transcript to a field item with SHA-256 provenance.", example: "{ itemId: 'KB-...', auditId: 'selected-audit', kind: 'photo', filename: 'site.jpg', base64: '…' }" },
 ];
 
-export const metrics = {
-  readiness: 82,
-  readinessDelta: "+7.4%",
-  openFindings: 12,
-  criticalFindings: 1,
-  supplierExposure: 3,
-  changes30d: 19,
-};
-
-export const agentPulse = {
-  state: "Monitoring",
-  lastRun: "17 Nov 2026 · 14:38 UTC",
-  coverage: "5 sources · 84,951 records",
-  recommendation: "Resolve F-042 evidence chain before accepting CHG-014 into baseline.",
-};
-
 export function getGraphNode(id: string) {
   return graphNodes.find((node) => node.id === id) ?? graphNodes[2];
 }

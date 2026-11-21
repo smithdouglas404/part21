@@ -412,15 +412,69 @@ export function Skills({
         {!activity.loading && !activity.error && !runs.length && (
           <Empty>No persisted runs for this audit.</Empty>
         )}
-        {runs.map((run, index) => (
-          <Json
-            value={run}
-            key={`${id(run)}-${index}`}
-            title={`${label(run, "Execution trace")} · ${text(run.traceId ?? run.id)} · ${text(run.status)}`}
-          />
-        ))}
-        {activity.data && (
-          <Json value={activity.data} title="Complete activity response" />
+        {runs.length > 0 && (
+          <>
+            <p className="muted-copy">
+              Showing the {Math.min(runs.length, 6)} most recent of {runs.length}{" "}
+              persisted runs. Each run is tied to an audit, a governed skill
+              revision and a human gate. The full trace records remain available
+              below for audit.
+            </p>
+            <div className="run-summary-grid">
+              {runs.slice(0, 6).map((run, index) => {
+                const status = String(run.status ?? "unknown");
+                const tone =
+                  status === "ready_for_human_gate"
+                    ? "ok"
+                    : status === "failed"
+                      ? "danger"
+                      : status === "needs_more_context"
+                        ? "warn"
+                        : "info";
+                return (
+                  <div
+                    className="run-summary"
+                    key={`${id(run)}-${index}`}
+                  >
+                    <div>
+                      <strong>{text(run.skillId, "Governed skill run")}</strong>
+                      <Badge tone={tone}>
+                        {status.replaceAll("_", " ")}
+                      </Badge>
+                    </div>
+                    <small>
+                      {text(run.actor, "Unknown actor")} ·{" "}
+                      {text(
+                        run.completedAt ?? run.startedAt,
+                        "time not recorded"
+                      )}
+                    </small>
+                    <small>
+                      Trace {text(run.traceId ?? run.id, "not recorded")} ·
+                      completion {text(run.completion, "0")}% · human gate{" "}
+                      {text(run.humanGate?.status, "pending")}
+                    </small>
+                  </div>
+                );
+              })}
+            </div>
+            <details className="technical-details">
+              <summary>
+                Technical trace records ({runs.length}) and complete activity
+                response
+              </summary>
+              {runs.map((run, index) => (
+                <Json
+                  value={run}
+                  key={`${id(run)}-${index}`}
+                  title={`${label(run, "Execution trace")} · ${text(run.traceId ?? run.id)} · ${text(run.status)}`}
+                />
+              ))}
+              {activity.data && (
+                <Json value={activity.data} title="Complete activity response" />
+              )}
+            </details>
+          </>
         )}
       </Panel>
     </div>
