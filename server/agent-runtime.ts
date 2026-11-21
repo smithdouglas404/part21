@@ -90,7 +90,10 @@ async function portfolio(auditId: string): Promise<AgentPortfolio> {
   const values = (type: string) => rows.filter(row => row.record_type === type && (row.audit_id === auditId || (type === "audit" || type === "metric") && row.record_id === auditId)).map(row => ({ ...parsed(row.payload), id: row.record_id, auditId }));
   const audit = values("audit").find(row => row.id === auditId) ?? null;
   if (!audit) throw new Error(`Audit ${auditId} was not found in the database.`);
-  return { source: "mysql-database", audit, findings: values("finding"), evidence: values("evidence"), controls: values("control"), sources: values("source"), suppliers: values("supplier"), changes: values("change"), metrics: values("metric").find(row => row.id === auditId) ?? null };
+  const findings = values("finding");
+  const evidence = values("evidence");
+  const auditWithCounts = { ...audit, findings: findings.length, evidence: `${evidence.length} linked database records` };
+  return { source: "mysql-database", audit: auditWithCounts, findings, evidence, controls: values("control"), sources: values("source"), suppliers: values("supplier"), changes: values("change"), metrics: values("metric").find(row => row.id === auditId) ?? null };
 }
 async function skills(includeCandidates: boolean): Promise<GovernedSkill[]> {
   const [rows] = await database().query<any[]>(`SELECT * FROM part21_controlled_configuration WHERE (kind='skill' AND status ${includeCandidates ? "IN ('active','draft')" : "='active'"})${includeCandidates ? " OR (kind='skill_candidate' AND status='draft')" : ""} ORDER BY config_id,version`);
@@ -143,9 +146,10 @@ export function createAgentServices(overrides: Partial<AgentServices> = {}): Age
     },
     async policy(scope, sourceIds) {
       const module = await import("./policy-runtime");
-      const fn = (module as unknown as Record<string, any>).evaluateAuditFindingPolicy;
+      const fn = (module as unknown as Record<string, any>).evaluatePolicyScoped;
       if (typeof fn !== "function") throw new Error("Scoped deterministic policy provider is unavailable; legacy first-audit evaluator is disabled.");
-      const result = await fn({ auditId: scope.auditId, findingId: scope.findingId, sourceIds });
+      if (!scope.findingId) throw new Error("A persisted findingId is required for policy evaluation.");
+      const result = await fn({ auditId: scope.auditId, findingId: scope.findingId });
       if (result.auditId !== scope.auditId || result.findingId !== scope.findingId) throw new Error("Policy scope mismatch.");
       return result;
     },
@@ -221,7 +225,7 @@ export async function getAgentRegistry(auditId?: string, services = createAgentS
   if (!auditId) throw new Error("auditId is required for agent activity.");
   const runs = await services.records("agent_run", auditId);
   const configured = await services.skills(false);
-  return { mode: "database-execution-registry", source: "mysql-database", auditId, agents: configured.map(row => ({ agentId: row.payload.agent, name: row.payload.name, state: "not_dispatched", route: row.payload.route, configurationVersion: row.version })), runs, controls: ["pause", "resume", "kill", "restart"], observability: { traceStore: "part21_agent_runs / part21_agent_tool_calls", heartbeat: "not_available_without_worker_provider" } };
+  return { mode: "database-execution-registry", source: "mysql-database", auditId, agents: configured.map(row => ({ agentId: row.payload.agent, name: row.payload.name, state: "not_dispatched", route: row.payload.route, configurationVersion: row.version, purpose: row.payload.purpose ?? null, phase: row.payload.phase ?? null, questionCount: Array.isArray(row.payload.questions) ? row.payload.questions.length : 0, requiredEvidence: Array.isArray(row.payload.requiredEvidence) ? row.payload.requiredEvidence : [], humanGate: row.payload.humanGate ?? null, regulatoryRefs: Array.isArray(row.payload.regulatoryRefs) ? row.payload.regulatoryRefs : [] })), runs, controls: ["pause", "resume", "kill", "restart"], observability: { traceStore: "part21_agent_runs / part21_agent_tool_calls", heartbeat: "not_available_without_worker_provider" } };
 }
 export async function controlAgent(agentId: string, action: "pause" | "resume" | "kill" | "restart", reason = "", scope?: AgentScope) {
   if (!scope) throw new Error("Trusted audit-scoped principal is required for runtime control.");

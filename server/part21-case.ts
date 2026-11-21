@@ -165,7 +165,50 @@ export function computeGateStates(facts: Part21CaseFacts): Part21GateRow[] {
 export async function listPart21Cases(auditId: string, principal: AssurancePrincipal) {
   assertAuditPermission(principal, auditId, false);
   const rows = await listDomainRecords<Part21CaseFacts>(PART21_CASE_RECORD, auditId);
-  return rows.map(row => ({ caseId: row.caseId, auditId: row.auditId, title: row.title, findingId: row.findingId ?? null, closed: Boolean(row.closure), createdAt: row.createdAt, updatedAt: row.updatedAt }));
+  const calendar = defaultCalendar();
+  const asOf = new Date().toISOString();
+  return rows.map(row => {
+    const schedule = computePart21Schedule(row, calendar, asOf);
+    const gates = computeGateStates(row);
+    const active = schedule.filter(branch => branch.triggerAt);
+    const overdue = active.filter(branch => branch.status === "overdue" || branch.status === "unknown");
+    const dueSoon = active.filter(branch => branch.status === "due_soon");
+    const pendingGates = gates.filter(gate => gate.state === "pending");
+    const nextDue = active
+      .filter(branch => branch.dueAt && branch.status !== "satisfied")
+      .sort((a, b) => Date.parse(a.dueAt!) - Date.parse(b.dueAt!))[0] ?? null;
+    const clockStatus = row.closure
+      ? "green"
+      : overdue.length
+        ? "red"
+        : active.length === 0
+          ? "gray"
+          : "amber";
+    return {
+      caseId: row.caseId,
+      auditId: row.auditId,
+      title: row.title,
+      findingId: row.findingId ?? null,
+      closed: Boolean(row.closure),
+      createdAt: row.createdAt,
+      updatedAt: row.updatedAt,
+      clockStatus,
+      activeClocks: active.length,
+      overdueClocks: overdue.length,
+      dueSoonClocks: dueSoon.length,
+      pendingGates: pendingGates.length,
+      nextDueAt: nextDue?.dueAt ?? null,
+      nextDueLabel: nextDue?.label ?? null,
+      daysRemaining: nextDue?.daysRemaining ?? null,
+      clocks: active.map(branch => ({
+        id: branch.id,
+        label: branch.label,
+        status: branch.status,
+        dueAt: branch.dueAt,
+        daysRemaining: branch.daysRemaining,
+      })),
+    };
+  });
 }
 
 export async function getPart21Case(auditId: string, caseId: string, principal: AssurancePrincipal, calendar?: Partial<DeclaredCalendar>) {

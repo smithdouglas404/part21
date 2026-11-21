@@ -18,6 +18,7 @@ import {
 import { motion } from "framer-motion";
 import { Card } from "@/components/ui/card";
 import { Admin, AdapterOperations, Identity } from "./Admin";
+import { Agents } from "./Agents";
 import { RbacAdmin } from "./Rbac";
 import { Board } from "./Board";
 import { Clocks } from "./Clocks";
@@ -25,8 +26,8 @@ import {
   Badge,
   Empty,
   EndpointPanel,
+  HumanDetail,
   Inspector,
-  Json,
   Panel,
   RecordList,
   ResourceState,
@@ -50,6 +51,89 @@ import {
   type Principal,
   type Row,
 } from "./api";
+
+function ControlPolicyCoverage({ auditId }: { auditId: string }) {
+  const coverage = useResource(scoped("/api/policy/coverage", auditId));
+  const message = coverage.error?.message ?? "";
+  const baselineMissing = /No reviewed policy baseline pinned/i.test(message);
+  if (coverage.loading)
+    return (
+      <Panel
+        title="Control policy evaluations"
+        subtitle={`Audit ${auditId}. Loading the pinned policy revision and rule results.`}
+      >
+        <ResourceState resource={coverage} />
+      </Panel>
+    );
+  if (baselineMissing)
+    return (
+      <Panel
+        title="Control policy evaluations"
+        subtitle={`Audit ${auditId}. The policy library is active, but this audit has no pinned reviewed baseline.`}
+      >
+        <div className="policy-gate">
+          <strong>Control coverage cannot be computed yet</strong>
+          <p>
+            This screen will not turn descriptive control evidence into a
+            coverage percentage, and it will not evaluate controls against an
+            unpinned or inferred policy revision. A qualified quality manager
+            must pin the exact approved Part 21 policy revision to this audit
+            first.
+          </p>
+          <p>
+            What to do next: open Policy as code to see the three confirmations
+            the qualified reviewer must record, then return here once the
+            baseline is pinned.
+          </p>
+          <small>
+            No pass result, coverage percentage, reportability conclusion or NRC
+            notification has been created by this screen.
+          </small>
+        </div>
+      </Panel>
+    );
+  if (coverage.error)
+    return (
+      <Panel title="Control policy evaluations">
+        <ResourceState resource={coverage} />
+      </Panel>
+    );
+  const results = rows(coverage.data, "results", "rules", "items", "evaluations");
+  return (
+    <Panel
+      title="Control policy evaluations"
+      subtitle={`Audit ${auditId}. Deterministic rule results against the pinned reviewed policy revision.`}
+    >
+      {results.length ? (
+        <div className="assurance-record-list">
+          {results.map((result, index) => (
+            <div className="assurance-record-row" key={text(result.id, String(index))}>
+              <span>
+                <strong>
+                  {text(result.rule?.citation ?? result.citation, "Rule")} ·{" "}
+                  {text(result.rule?.title ?? result.title, "Control rule")}
+                </strong>
+                <small>
+                  {text(result.disposition, "unknown").replaceAll("_", " ")} ·{" "}
+                  {Array.isArray(result.reasons) && result.reasons.length
+                    ? result.reasons.map(String).join(" ")
+                    : "No reason text returned; the rule remains open."}
+                </small>
+              </span>
+              <Badge>{text(result.disposition, "unknown")}</Badge>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <Empty>
+          The pinned baseline is available, but no control evaluation has been
+          recorded for this audit. Run the policy evaluation from a persisted
+          finding; no coverage percentage is inferred from an empty result.
+        </Empty>
+      )}
+    </Panel>
+  );
+}
 
 const navigation = [
   {
@@ -309,9 +393,14 @@ function Overview({
           : text(readiness),
       detail: "Source-provided metric only; inspect exact basis.",
       data: {
+        summary: `Recorded readiness for ${auditId} is ${readiness ?? "unknown"}.`,
+        narrative:
+          "This is the value persisted in the audit metric record. It is an indicator of how much of the audit evidence and review work is complete, not a certification that the audited activity complies with 10 CFR Part 21 or Appendix B. The report and the underlying findings remain the authoritative record.",
+        readinessBasis:
+          metrics.readinessBasis ??
+          metrics.formula ??
+          "The database does not record a separate calculation formula for this metric. Treat it as a source-provided indicator and inspect the linked findings, evidence and controls before relying on it.",
         auditId,
-        metrics: portfolio.metrics ?? null,
-        readinessBasis: metrics.readinessBasis ?? metrics.formula ?? null,
       },
     },
     {
@@ -319,6 +408,9 @@ function Overview({
       value: String(findingCount),
       detail: "Returned records not marked closed/resolved/complete/approved.",
       data: {
+        summary: `${findingCount} finding${findingCount === 1 ? "" : "s"} remain unresolved or unclassified in ${auditId}.`,
+        narrative:
+          "A finding is counted here when its recorded status is not closed, resolved, complete or approved. Missing status is treated as unclassified. Each row below is an actual finding record: severity, owner and status come from the database, not from a computed score.",
         auditId,
         countBasis:
           "Returned findings excluding recorded closed/resolved/complete/approved status; missing status is unclassified",
@@ -329,13 +421,25 @@ function Overview({
       title: "Registered evidence",
       value: String(evidence.length),
       detail: "Count of actual evidence records in this audit.",
-      data: { auditId, evidence },
+      data: {
+        summary: `${evidence.length} evidence record${evidence.length === 1 ? "" : "s"} are registered for ${auditId}.`,
+        narrative:
+          "Registration means the record exists in this audit's evidence register. It does not mean the evidence has been accepted, is sufficient, or has been bound to a finding. Open any row below to see its source, state, confidence and linkage.",
+        auditId,
+        evidence,
+      },
     },
     {
       title: "Linked suppliers",
       value: String(rows(portfolio.suppliers).length),
       detail: "Linked records—not a computed supplier-risk score.",
-      data: { auditId, suppliers: portfolio.suppliers ?? [] },
+      data: {
+        summary: `${rows(portfolio.suppliers).length} supplier record${rows(portfolio.suppliers).length === 1 ? " is" : "s are"} linked to ${auditId}.`,
+        narrative:
+          "This is a count of linked supplier records. It is not a supplier-risk score and it does not imply that the supplier is approved or performing. The records below carry the actual status and description.",
+        auditId,
+        suppliers: portfolio.suppliers ?? [],
+      },
     },
   ];
   return (
@@ -385,8 +489,8 @@ function Overview({
       </div>
       <div className="overview-grid">
         <Panel
-          title={label(audit)}
-          subtitle={`${id(audit)} · ${text(audit.standard, "Standard not recorded")} · ${text(audit.scope, "Scope not recorded")}`}
+          title="Audit profile"
+          subtitle={`${label(audit)} · ${id(audit)} · ${text(audit.standard, "Standard not recorded")}`}
           actions={
             <button className="ghost-button" onClick={() => navigate("audit")}>
               Open workbench
@@ -399,9 +503,12 @@ function Overview({
               Owner {text(audit.owner, "Not recorded")} · due {text(audit.due)}
             </span>
           </div>
-          <Json
-            value={audit}
-            title="Exact audit profile, scope and record revision"
+          <HumanDetail
+            value={{
+              ...audit,
+              findings: findings.length,
+              evidence: `${evidence.length} registered`,
+            }}
           />
           <div className="assurance-inline">
             <button className="ghost-button" onClick={() => navigate("graph")}>
@@ -570,7 +677,13 @@ export function Workspace({
       </div>
     );
   else if (view === "graph")
-    page = <Graph auditId={auditId} findingId={actualFindingId} />;
+    page = (
+      <Graph
+        auditId={auditId}
+        findingId={actualFindingId}
+        onNavigate={navigate}
+      />
+    );
   else if (view === "skills")
     page = (
       <Skills
@@ -617,11 +730,7 @@ export function Workspace({
             onInspect={row => openInspect(label(row), row)}
           />
         </Panel>
-        <EndpointPanel
-          title="Control policy evaluations"
-          path={scoped("/api/policy/coverage", auditId)}
-          keys={["results", "rules", "items"]}
-        />
+        <ControlPolicyCoverage auditId={auditId} />
       </div>
     );
   else if (view === "policy")
@@ -642,7 +751,7 @@ export function Workspace({
       <div className="view-stack">
         <Identity principal={principal} />
         <Panel title="Governed perspective, unchanged permissions">
-          <Json value={personas.find(p => id(p) === lensId)} open />
+          <HumanDetail value={personas.find(p => id(p) === lensId)} />
           <button className="ghost-button" onClick={refreshSession}>
             Refresh actual permissions
           </button>
@@ -657,17 +766,7 @@ export function Workspace({
           auditId={auditId}
           findingId={actualFindingId}
         />
-        <EndpointPanel
-          title="Persisted agent activity"
-          path={scoped("/api/agentkit/activity", auditId)}
-          keys={["runs", "agents", "activity", "items"]}
-        />
-        <EndpointPanel
-          title="Agent runtime registry"
-          path={scoped("/api/agents/registry", auditId)}
-          keys={["agents", "runs"]}
-          subtitle="Inspect actual runtime state; no fabricated watchers, heartbeats or completed simulations."
-        />
+        <Agents auditId={auditId} findingId={actualFindingId} />
       </div>
     );
   else if (view === "data")
@@ -889,7 +988,7 @@ export function Workspace({
       )}
       {inspection && (
         <Inspector title={inspection.title} onClose={() => setInspection(null)}>
-          <Json value={inspection.data} open />
+          <HumanDetail value={inspection.data} />
         </Inspector>
       )}
     </div>

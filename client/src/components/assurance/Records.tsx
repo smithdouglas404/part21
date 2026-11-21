@@ -5,6 +5,7 @@ import {
   Badge,
   Empty,
   ErrorNotice,
+  HumanDetail,
   Inspector,
   Json,
   JsonOperation,
@@ -15,6 +16,7 @@ import {
 import {
   download,
   fileBase64,
+  formatWhen,
   id,
   label,
   payload,
@@ -117,7 +119,7 @@ export function Evidence({
         subtitle="Actual provider and retention status, not a storage-product assurance claim."
       >
         <ResourceState resource={vault} />
-        {vault.data && <Json value={vault.data} open />}
+        {vault.data && <HumanDetail value={vault.data} />}
       </Panel>
       {selected && (
         <Inspector
@@ -125,7 +127,7 @@ export function Evidence({
           description={`Evidence ${id(selected)} · audit ${auditId}`}
           onClose={() => setSelected(null)}
         >
-          <Json value={selected} open />
+          <HumanDetail value={selected} />
           <AssetActions asset={payload(selected)} auditId={auditId} />
         </Inspector>
       )}
@@ -241,7 +243,7 @@ export function Documents({
       </Panel>
       <Panel title="Document custody and review boundaries">
         <ResourceState resource={status} />
-        {status.data && <Json value={status.data} open />}
+        {status.data && <HumanDetail value={status.data} />}
       </Panel>
       {selected && (
         <Inspector
@@ -249,7 +251,7 @@ export function Documents({
           description={`${auditId} · document ${id(selected)} · revision ${text(payload(selected).revision)}`}
           onClose={() => setSelectedId("")}
         >
-          <Json value={selected} open />
+          <HumanDetail value={selected} />
           <AssetActions auditId={auditId} asset={payload(selected)} />
           {qualified ? (
             <JsonOperation
@@ -276,6 +278,124 @@ export function Documents({
     </div>
   );
 }
+function ReadinessNarrative({ report }: { report: Row }) {
+  const audit = report.audit ?? {};
+  const metrics = report.metrics ?? {};
+  const findings = Array.isArray(report.findings) ? report.findings : [];
+  const controls = Array.isArray(report.controls) ? report.controls : [];
+  const decisions = Array.isArray(report.humanDecisionsRequired)
+    ? report.humanDecisionsRequired
+    : [];
+  return (
+    <article className="readiness-report">
+      <header className="readiness-report-head">
+        <div>
+          <span className="tiny-label">10 CFR PART 21 · APPENDIX B</span>
+          <h2>{text(audit.title, "Audit readiness report")}</h2>
+          <p>
+            {text(audit.id, report.auditId)} · {text(audit.scope, "Scope not recorded")} ·{" "}
+            {text(audit.standard, "Standard not recorded")}
+          </p>
+        </div>
+        <div className="readiness-report-meta">
+          <Badge>{text(audit.status, "Status not recorded")}</Badge>
+          <small>Owner {text(audit.owner, "Not assigned")}</small>
+          <small>Due {text(audit.due, "Not recorded")}</small>
+          <small>
+            Draft generated {formatWhen(report.generatedAt, "time not recorded")}
+          </small>
+        </div>
+      </header>
+      <section className="readiness-position">
+        <span className="tiny-label">EXECUTIVE POSITION</span>
+        <h3>{text(report.executivePosition, "Qualified review required")}</h3>
+        <p>
+          This draft reports the database evidence and the open questions. It is
+          not a compliance certification, a reportability determination or an
+          NRC notification. A qualified person must resolve every item below
+          before the audit is closed.
+        </p>
+      </section>
+      <section className="readiness-metrics">
+        <div>
+          <span>Readiness signal</span>
+          <strong>{text(metrics.readiness, "Unknown")}%</strong>
+          <small>{text(metrics.readinessDelta, "No trend recorded")}</small>
+        </div>
+        <div>
+          <span>Open findings</span>
+          <strong>{text(metrics.openFindings, String(findings.length))}</strong>
+          <small>{text(metrics.criticalFindings, "0")} critical</small>
+        </div>
+        <div>
+          <span>Evidence linked</span>
+          <strong>{text(report.evidence?.length, "0")} records</strong>
+          <small>Persisted in this audit; not a coverage percentage</small>
+        </div>
+        <div>
+          <span>Supplier exposure</span>
+          <strong>{text(metrics.supplierExposure, "0")}</strong>
+          <small>{text(metrics.changes30d, "0")} changes in 30 days</small>
+        </div>
+      </section>
+      <section>
+        <h3>What the audit found</h3>
+        {findings.length ? (
+          <div className="readiness-findings">
+            {findings.map((finding: Row) => (
+              <div className="readiness-finding" key={text(finding.id)}>
+                <div>
+                  <strong>{text(finding.title, "Finding")}</strong>
+                  <small>
+                    {text(finding.id)} · {text(finding.severity)} ·{" "}
+                    {text(finding.status)} · owner {text(finding.owner, "unassigned")}
+                  </small>
+                </div>
+                <span>{text(finding.age, "")}</span>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p>No findings are recorded in this audit scope.</p>
+        )}
+      </section>
+      <section>
+        <h3>Control coverage</h3>
+        <p>
+          These are recorded control statuses, not policy-evaluated coverage
+          percentages. A percentage is withheld until a qualified reviewer pins
+          the exact Part 21 policy baseline to this audit.
+        </p>
+        <div className="readiness-controls">
+          {controls.map((control: Row) => (
+            <div key={text(control.id)}>
+              <strong>{text(control.title, text(control.family))}</strong>
+              <small>
+                Recorded status: {text(control.status, "not recorded")} · next:{" "}
+                {text(control.next, "not recorded")}
+              </small>
+            </div>
+          ))}
+        </div>
+      </section>
+      <section className="readiness-decisions">
+        <h3>What still needs a person</h3>
+        <ul>
+          {decisions.map((decision: unknown) => (
+            <li key={text(decision)}>{text(decision)}</li>
+          ))}
+        </ul>
+        <p>{text(report.traceabilityNote, "Traceability note not returned.")}</p>
+      </section>
+      <footer>
+        Report {text(report.reportVersion, "draft")} · data source{" "}
+        {text(report.dataMode, "database")} · generated{" "}
+        {formatWhen(report.generatedAt, "time not recorded")}
+      </footer>
+    </article>
+  );
+}
+
 export function Reports({
   auditId,
   principal,
@@ -326,43 +446,10 @@ export function Reports({
         actions={
           <div className="assurance-inline">
             <button
-              className="ghost-button"
-              disabled={action.busy || !report.data}
-              onClick={() =>
-                action.run(() =>
-                  download(
-                    scoped("/api/reports/audit-readiness", auditId),
-                    `readiness-${auditId}.json`
-                  ).then(() => ({
-                    auditId,
-                    format: "JSON",
-                    downloadCompleted: true,
-                  }))
-                )
-              }
+              className="primary-button"
+              disabled={!report.data}
+              onClick={() => window.print()}
             >
-              <Download size={13} />
-              JSON
-            </button>
-            <button
-              className="ghost-button"
-              disabled={action.busy}
-              onClick={() =>
-                action.run(() =>
-                  download(
-                    scoped("/api/reports/audit-readiness.csv", auditId),
-                    `readiness-${auditId}.csv`
-                  ).then(() => ({
-                    auditId,
-                    format: "CSV",
-                    downloadCompleted: true,
-                  }))
-                )
-              }
-            >
-              CSV
-            </button>
-            <button className="ghost-button" onClick={() => window.print()}>
               Print / PDF
             </button>
           </div>
@@ -370,11 +457,52 @@ export function Reports({
       >
         <ResourceState resource={report} />
         {report.data && (
-          <Json
-            value={report.data}
-            title="Exact report, basis, source links and approval history"
-            open
-          />
+          <>
+            <ReadinessNarrative report={report.data} />
+            <details className="technical-details">
+              <summary>Technical exports and raw report data</summary>
+              <div className="assurance-inline">
+                <button
+                  className="ghost-button"
+                  disabled={action.busy}
+                  onClick={() =>
+                    action.run(() =>
+                      download(
+                        scoped("/api/reports/audit-readiness", auditId),
+                        `readiness-${auditId}.json`
+                      ).then(() => ({
+                        auditId,
+                        format: "JSON",
+                        downloadCompleted: true,
+                      }))
+                    )
+                  }
+                >
+                  <Download size={13} />
+                  JSON source
+                </button>
+                <button
+                  className="ghost-button"
+                  disabled={action.busy}
+                  onClick={() =>
+                    action.run(() =>
+                      download(
+                        scoped("/api/reports/audit-readiness.csv", auditId),
+                        `readiness-${auditId}.csv`
+                      ).then(() => ({
+                        auditId,
+                        format: "CSV",
+                        downloadCompleted: true,
+                      }))
+                    )
+                  }
+                >
+                  CSV source
+                </button>
+              </div>
+              <Json value={report.data} />
+            </details>
+          </>
         )}
       </Panel>
       <Panel

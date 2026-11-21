@@ -14,14 +14,15 @@ import { buildAuditReadinessReport, exportBitemporalGraph, finalizeAuditReport, 
 import { approveRoutedFinalReport, listReportApprovalTasks, routeFinalReportApproval } from "../report-approval";
 import { listAssurancePeople } from "../people";
 import { listApprovalRules } from "../approval-rules";
-import { appendKanbanCommunication, attachKanbanAsset, createKanbanItem, listKanbanItems, moveKanbanItem } from "../kanban-store";
+import { appendKanbanCommunication, attachKanbanAsset, createKanbanItem, listKanbanItems, moveKanbanItem, recordKanbanSkillRun } from "../kanban-store";
+import { activateCardSkill } from "../kanban-skill";
 import { ensureAuditBaseline } from "../audit-baseline";
 import { ontologyStorageStatus, syncOntologySnapshot } from "../ontology-store";
 import { getReportDraft, registerEvidence } from "../evidence";
 import { assessControlledRemediationImpact, getAuditProfiles, getControlledRegulatoryPack, traverseControlledRegulatoryTree } from "../regulatory-runtime";
 import { acknowledgeComplianceWarning, answerGroundedQuestion, answerLiveGroundedQuestion, configureAiProvider, getAiStatus, runFindingIntakeDialogue } from "../ai";
 import { getEccCatalog, getEmbeddedEccModule } from "../../shared/ecc";
-import { decideGovernanceItem, getGovernanceBoard, moveGovernanceItem } from "../../shared/governance";
+import { decideGovernanceItem, getGovernanceBoard, moveGovernanceItem } from "../governance-store";
 import { controlAgent, getAgentRegistry } from "../agent-runtime";
 import { getVendoredEccLibrary } from "../ecc-library";
 import { renderEmbeddedEccDashboard } from "../ecc-dashboard";
@@ -32,7 +33,7 @@ import { getEventStoreStatus, listAssuranceEvents } from "../event-store";
 import { runWeeklySourceSync } from "../weekly-sync";
 import { callConnectedTool, createConnectToken, listConnectTokens, revokeConnectToken } from "../connect-api";
 import { generateSyntheticPart21Decision, getDocumentControlStatus, listControlledDocuments, notarizeDocumentWithHederaDemo, registerControlledDocument, reviewDocumentCybersecurity } from "../document-control";
-import { getGroundedGraphContext, getGraphStoreStatus, validateGraphOntology } from "../graph-store";
+import { getGroundedGraphContext, getGraphStoreStatus, listAuditGraphProjection, validateGraphOntology } from "../graph-store";
 import { getDomainPortfolio, getDomainStoreStatus, listAudits, writeDomainRecordWithEvent } from "../domain-store";
 import { getConfigurationStoreStatus, getControlledConfiguration, listControlledConfigurations, listControlledConfigurationPayloads } from "../config-store";
 import { getMergedStudioOpenApi, getStudioGatewayStatus, studioProxyMiddleware } from "../studio-gateway";
@@ -174,7 +175,17 @@ async function startServer() {
   // principal, so a look-only visitor can read but never write.
   configureVaultRuntime({
     authorize: async (principal: any, auditId: string, action: any) => {
-      assertAuditPermission(principal, auditId, action !== "read");
+      // The vault receives an actor identifier from record payloads. Resolve it
+      // back to the authenticated session principal so a signed-in administrator
+      // is not treated as an anonymous record with no audit grants.
+      let effective = principal;
+      try {
+        const session = currentPrincipal();
+        if (session && principal?.id === session.id) effective = session;
+      } catch {
+        // Unauthenticated background work still uses the explicit principal.
+      }
+      assertAuditPermission(effective, auditId, action !== "read");
     },
     resolvePrincipal: async () => currentPrincipal(),
   });
@@ -363,10 +374,21 @@ async function startServer() {
   app.post("/api/sync/weekly", async (req, res) => res.json(await runWeeklySourceSync(String(req.body?.actor ?? "Application weekly scheduler"))));
   app.get("/api/approvals/pending", async (_req, res) => res.json({ approvalStatus: "pending_human_review", items: await listPendingWorkbookApprovals(), humanGate: "Qualified reviewer must inspect source provenance and revision diff before approval." }));
   app.post("/api/approvals/workbooks/:workbookId", async (req, res) => res.json(await approveWorkbookImport(req.params.workbookId, String(req.body?.actor ?? "Quality approver"), String(req.body?.note ?? "Approved after human review"))));
-  app.get("/api/document-control/status", async (_req, res) => res.json(await getDocumentControlStatus()));
+  app.get("/api/document-control/status", async (req, res) => {
+    const auditId = typeof req.query.auditId === "string" ? req.query.auditId : "";
+    res.json(await getDocumentControlStatus(auditId || undefined));
+  });
   app.get("/api/documents", async (req, res) => res.json({ documents: await listControlledDocuments({ auditId: typeof req.query.auditId === "string" ? req.query.auditId : undefined }) }));
-  app.post("/api/documents", async (req, res) => { requireWritePrincipal(); await requireArea("documents", "write"); res.json(await registerControlledDocument(req.body ?? {})); });
-  app.post("/api/documents/:documentId/cybersecurity-review", async (req, res) => { requireWritePrincipal(); await requireArea("documents", "write"); res.json(await reviewDocumentCybersecurity(req.params.documentId, req.body ?? {})); });
+  app.post("/api/documents", async (req, res) => {
+    const principal = requireWritePrincipal();
+    await requireArea("documents", "write");
+    res.json(await registerControlledDocument({ ...(req.body ?? {}), actor: principal.id }));
+  });
+  app.post("/api/documents/:documentId/cybersecurity-review", async (req, res) => {
+    const principal = requireWritePrincipal();
+    await requireArea("documents", "write");
+    res.json(await reviewDocumentCybersecurity(req.params.documentId, { ...(req.body ?? {}), reviewer: principal.id }));
+  });
   app.post("/api/documents/:documentId/notarize", async (req, res) => { requireWritePrincipal(); await requireArea("documents", "write"); res.json(await notarizeDocumentWithHederaDemo(req.params.documentId, String(req.body?.actor ?? currentPrincipal().actor))); });
   app.post("/api/documents/:documentId/part21-decision", async (req, res) => { requireWritePrincipal(); await requireArea("documents", "write"); res.json(await generateSyntheticPart21Decision(req.params.documentId, String(req.body?.actor ?? currentPrincipal().actor))); });
   app.get("/api/admin/excel/status", async (_req, res) => res.json(await getExcelAdapterStatus()));
@@ -377,8 +399,40 @@ async function startServer() {
   app.get("/api/agentkit/manifest", async (_req, res) => {
     res.json(await getAgentKitManifest());
   });
-  app.post("/api/agentkit/run", async (req, res) => {
-    res.json(await runAuditSkill(String(req.body?.skillId ?? ""), req.body?.answers ?? {}));
+  app.post("/api/agentkit/run", async (req: any, res: any) => {
+    try {
+      const principal = currentPrincipal();
+      await requireArea("skills", "execute");
+      const auditId = String(req.body?.auditId ?? "").trim();
+      const skillId = String(req.body?.skillId ?? "").trim();
+      if (!auditId || !skillId) throw new Error("auditId and skillId are required for a governed skill run.");
+      const result = await runAuditSkill({
+        auditId,
+        findingId: String(req.body?.findingId ?? "").trim() || undefined,
+        skillId,
+        skillVersion: String(req.body?.skillVersion ?? "").trim() || undefined,
+        answers: req.body?.answers ?? {},
+        evidenceBindings: req.body?.evidenceBindings ?? {},
+        actor: principal.actor ?? principal.id,
+        principal,
+      } as any);
+      const cardId = String(req.body?.cardId ?? "").trim();
+      if (cardId) {
+        await recordKanbanSkillRun(cardId, auditId, principal.actor ?? principal.id, {
+          traceId: result.traceId,
+          skillId,
+          skillVersion: result.appliedSkill?.version,
+          status: result.status,
+          completion: result.completion,
+          answers: req.body?.answers ?? {},
+          evidenceBindings: req.body?.evidenceBindings ?? {},
+          advisories: result.advisories ?? [],
+        }, principal as any);
+      }
+      res.json({ ...result, cardId: cardId || null });
+    } catch (error) {
+      respondWithError(res, error);
+    }
   });
   app.post("/api/agentkit/simulate", async (req, res) => {
     res.json(await simulateFullAuditExecution(typeof req.body?.findingId === "string" ? req.body.findingId : undefined));
@@ -436,7 +490,20 @@ async function startServer() {
     return res.json(await ensureAuditBaseline(auditId, currentPrincipal()));
   }));
   app.post("/api/kanban/items", jsonRoute(async (req: any, res: any) => { await requireArea("kanban", "write"); return res.json(await createKanbanItem(req.body ?? {}, currentPrincipal() as any)); }));
-  app.post("/api/kanban/items/:itemId/move", jsonRoute(async (req: any, res: any) => { await requireArea("kanban", "write"); return res.json(await moveKanbanItem(req.params.itemId, req.body?.status, String(req.body?.actor ?? currentPrincipal().actor), String(req.body?.auditId ?? req.query.auditId ?? ""), req.body?.expectedRevision === undefined ? undefined : Number(req.body.expectedRevision), req.body?.reason ? String(req.body.reason) : undefined, currentPrincipal() as any)); }));
+  app.post("/api/kanban/items/:itemId/move", jsonRoute(async (req: any, res: any) => {
+    await requireArea("kanban", "write");
+    const principal = currentPrincipal();
+    const auditId = String(req.body?.auditId ?? req.query.auditId ?? "");
+    const moved = await moveKanbanItem(req.params.itemId, req.body?.status, String(req.body?.actor ?? principal.actor), auditId, req.body?.expectedRevision === undefined ? undefined : Number(req.body.expectedRevision), req.body?.reason ? String(req.body.reason) : undefined, principal as any);
+    let activation: unknown = null;
+    let activationError: string | null = null;
+    try {
+      activation = await activateCardSkill(req.params.itemId, auditId, principal.actor ?? principal.id, principal as any);
+    } catch (error) {
+      activationError = error instanceof Error ? error.message : String(error);
+    }
+    return res.json({ ...moved, skillActivation: activation, skillActivationError: activationError });
+  }));
   app.post("/api/kanban/items/:itemId/attachments", jsonRoute(async (req: any, res: any) => { await requireArea("kanban", "write"); return res.json(await attachKanbanAsset({ ...(req.body ?? {}), itemId: req.params.itemId }, currentPrincipal() as any)); }));
   app.post("/api/kanban/items/:itemId/communications", jsonRoute(async (req: any, res: any) => { await requireArea("kanban", "write"); return res.json(await appendKanbanCommunication({ ...(req.body ?? {}), itemId: req.params.itemId, auditId: String(req.body?.auditId ?? ""), conversationId: String(req.body?.conversationId ?? `KANBAN-${req.params.itemId}`), role: req.body?.role === "agent" || req.body?.role === "system" ? req.body.role : "user", actor: String(req.body?.actor ?? currentPrincipal().actor), text: String(req.body?.text ?? ""), skillIds: Array.isArray(req.body?.skillIds) ? req.body.skillIds.map(String) : [] }, currentPrincipal() as any)); }));
   app.post("/api/reports/:auditId/approval-route", async (req, res) => { try { res.json(await routeFinalReportApproval(req.params.auditId, String(req.body?.personaId ?? ""), String(req.body?.routedBy ?? "Audit workflow"), String(req.body?.note ?? "Final report requires qualified human disposition."), { id: String(req.body?.personId ?? ""), name: String(req.body?.personName ?? ""), email: String(req.body?.personEmail ?? "") })); } catch (error) { res.status(409).json({ ok: false, error: error instanceof Error ? error.message : "Report routing failed" }); } });
@@ -460,7 +527,32 @@ async function startServer() {
   app.get("/api/ai/status", (_req, res) => res.json(getAiStatus()));
   app.get("/api/graph/store/status", async (_req, res) => res.json(await getGraphStoreStatus()));
   app.get("/api/graph/ontology-validation", async (_req, res) => res.json(await validateGraphOntology()));
-  app.get("/api/graph/context", async (req, res) => { try { res.json(await getGroundedGraphContext(typeof req.query.findingId === "string" ? req.query.findingId : "", typeof req.query.auditId === "string" ? req.query.auditId : "")); } catch (error) { respondWithError(res, error); } });
+  app.get("/api/graph/context", async (req, res) => {
+    try {
+      const findingId = typeof req.query.findingId === "string" ? req.query.findingId.trim() : "";
+      const auditId = typeof req.query.auditId === "string" ? req.query.auditId.trim() : "";
+      const options = {
+        asOf: typeof req.query.asOf === "string" ? req.query.asOf : undefined,
+        effectiveAt: typeof req.query.effectiveAt === "string" ? req.query.effectiveAt : undefined,
+      };
+      if (findingId) {
+        return res.json(await getGroundedGraphContext(findingId, auditId, options));
+      }
+      const projection: any = await listAuditGraphProjection(auditId, options);
+      const portfolio = await getDomainPortfolio(auditId);
+      projection.pendingPromotion = {
+        findings: Array.isArray(portfolio.findings) ? portfolio.findings.length : 0,
+        evidence: Array.isArray(portfolio.evidence) ? portfolio.evidence.length : 0,
+        controls: Array.isArray(portfolio.controls) ? portfolio.controls.length : 0,
+        suppliers: Array.isArray(portfolio.suppliers) ? portfolio.suppliers.length : 0,
+        changes: Array.isArray(portfolio.changes) ? portfolio.changes.length : 0,
+        note: "These records are persisted in the audit but are not graph nodes until a qualified report approval promotes the audit projection.",
+      };
+      res.json(projection);
+    } catch (error) {
+      respondWithError(res, error);
+    }
+  });
   app.post("/api/ai/ask", async (req, res) => {
     const question = String(req.body?.question ?? "");
     const audits = await listAudits();
@@ -523,18 +615,38 @@ async function startServer() {
   app.get("/ecc", (_req, res) => res.type("html").send(renderEmbeddedEccDashboard()));
   app.get("/ecc/", (_req, res) => res.type("html").send(renderEmbeddedEccDashboard()));
   app.get("/api/activity", (_req, res) => res.json({ entries: [] }));
-  app.get("/api/governance/board", (_req, res) => res.json(getGovernanceBoard()));
-  app.post("/api/governance/move", (req, res) => res.json(moveGovernanceItem(String(req.body?.id ?? ""), req.body?.target, String(req.body?.actor ?? "Assurance user"))));
+  app.get("/api/governance/board", jsonRoute(async (req: any, res: any) => {
+    const auditId = String(req.query.auditId ?? "").trim();
+    if (!auditId) return res.status(400).json({ ok: false, error: "auditId is required for the governance board." });
+    return res.json(await getGovernanceBoard(auditId));
+  }));
+  app.post("/api/governance/move", jsonRoute(async (req: any, res: any) => {
+    requireWritePrincipal();
+    await requireArea("governance", "decide");
+    const auditId = String(req.body?.auditId ?? "").trim();
+    const result = await moveGovernanceItem(auditId, String(req.body?.id ?? ""), req.body?.target, currentPrincipal().actor);
+    if ((result as any)?.ok === false) return res.status(400).json(result);
+    return res.json(result);
+  }));
   app.post("/api/governance/decide", jsonRoute(async (req: any, res: any) => {
     requireWritePrincipal();
     await requireArea("governance", "decide");
-    const result = decideGovernanceItem(String(req.body?.id ?? ""), req.body?.action, String(req.body?.note ?? ""), req.body?.deferUntil, String(req.body?.actor ?? currentPrincipal().actor));
-    if ((result as any)?.ok === false) return res.status(404).json(result);
+    const auditId = String(req.body?.auditId ?? "").trim();
+    const result = await decideGovernanceItem(auditId, String(req.body?.id ?? ""), req.body?.action, String(req.body?.note ?? ""), req.body?.deferUntil, currentPrincipal().actor);
+    if ((result as any)?.ok === false) return res.status(400).json(result);
     return res.json(result);
   }));
-  app.get("/api/agents/registry", async (_req, res) => res.json(await getAgentRegistry()));
+  app.get("/api/agents/registry", async (req, res) => {
+    const auditId = String(req.query.auditId ?? "").trim();
+    if (!auditId) return res.status(400).json({ ok: false, error: "auditId is required for the agent registry." });
+    res.json(await getAgentRegistry(auditId));
+  });
   app.post("/api/agents/control", async (req, res) => { requireAdministrator(currentPrincipal()); res.json(await controlAgent(String(req.body?.agentId ?? ""), req.body?.action, String(req.body?.reason ?? ""))); });
-  app.get("/api/policy/part21", async (_req, res) => res.json(await getControlledPolicyPack()));
+  app.get("/api/policy/part21", async (req, res) => {
+    const auditId = String(req.query.auditId ?? "").trim();
+    if (!auditId) return res.status(400).json({ ok: false, error: "auditId is required for the controlled policy pack." });
+    res.json(await getControlledPolicyPack(auditId));
+  });
   app.get("/api/policy/graph", async (req, res) => {
     const auditId = String(req.query.auditId ?? "").trim();
     if (!auditId) return res.status(400).json({ ok: false, error: "auditId is required for the policy graph." });
@@ -731,6 +843,13 @@ async function startServer() {
     const auditId = String(req.query.auditId ?? "").trim();
     if (!auditId) return res.status(400).json({ ok: false, error: "auditId is required for evidence vault status" });
     return res.json(await getEvidenceVaultStatus(auditId, currentPrincipal() as any));
+  }));
+  app.get("/api/evidence/records", jsonRoute(async (req: any, res: any) => {
+    await requireArea("evidence", "read");
+    const auditId = String(req.query.auditId ?? "").trim();
+    if (!auditId) return res.status(400).json({ ok: false, error: "auditId is required for the evidence register" });
+    const records = await listDomainRecords<any>("evidence", auditId);
+    return res.json({ auditId, evidence: records, source: "mysql-database", count: records.length });
   }));
 
   app.get("/api/evidence/assets/:assetId/download", jsonRoute(async (req: any, res: any) => {

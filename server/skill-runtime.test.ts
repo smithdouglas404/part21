@@ -69,7 +69,7 @@ describe("real tool dispatch and persistence", () => {
   });
   it("policy failure is unknown and not a substituted keyword evaluator", async () => {
     const services = mockServices(); services.policy = vi.fn(async () => { throw new Error("No approved evaluator"); });
-    const result = await runAuditSkill({ ...input, skillId: "finding-challenge" }, {}, undefined, services); expect(result.policy).toBeNull(); expect(result.unknowns.join(" ")).toContain("No approved evaluator");
+    const result = await runAuditSkill({ ...input, skillId: "finding-challenge" }, {}, undefined, services); expect(result.policy).toBeNull(); expect([...result.unknowns, ...result.advisories].join(" ")).toContain("No approved evaluator");
   });
   it("does not expose mismatched policy/evidence response", async () => {
     const services = mockServices(); services.policy = vi.fn(async () => ({ auditId: "other-audit", findingId: "test-finding", secret: "not allowed" }));

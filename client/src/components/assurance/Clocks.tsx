@@ -2,13 +2,20 @@ import { useState } from "react";
 import {
   Badge,
   Empty,
-  Inspector,
   Json,
   JsonOperation,
   Panel,
   ResourceState,
 } from "./Common";
-import { rows, scoped, text, useResource, type Row } from "./api";
+import {
+  formatDay,
+  formatWhen,
+  rows,
+  scoped,
+  text,
+  useResource,
+  type Row,
+} from "./api";
 
 const STATUS_TONE: Record<string, string> = {
   overdue: "danger",
@@ -24,8 +31,31 @@ function daysLabel(value: unknown) {
   if (value === null || value === undefined) return "no computed date";
   const days = Number(value);
   if (!Number.isFinite(days)) return "no computed date";
-  if (days < 0) return `${Math.abs(days)} day${Math.abs(days) === 1 ? "" : "s"} past the outer limit`;
+  if (days < 0)
+    return `${Math.abs(days)} day${Math.abs(days) === 1 ? "" : "s"} past the outer limit`;
   return `${days} day${days === 1 ? "" : "s"} remaining`;
+}
+
+function clockTone(status: string) {
+  if (status === "red") return "danger";
+  if (status === "amber") return "warn";
+  if (status === "green") return "ok";
+  return "muted";
+}
+
+function clockLabel(status: string) {
+  if (status === "red") return "Red · action required";
+  if (status === "amber") return "Amber · clock running";
+  if (status === "green") return "Green · satisfied";
+  return "Gray · not started";
+}
+
+function caseStatusLabel(value: unknown) {
+  const status = String(value ?? "gray");
+  if (status === "red") return "Red";
+  if (status === "amber") return "Amber";
+  if (status === "green") return "Green";
+  return "Not started";
 }
 
 export function Clocks({
@@ -61,81 +91,131 @@ export function Clocks({
   const calendar = detail.data?.calendar ?? process.data?.calendar ?? {};
   const verified = verification.data;
 
+  const red = list.filter(row => text(row.clockStatus) === "red");
+  const amber = list.filter(row => text(row.clockStatus) === "amber");
+  const green = list.filter(row => text(row.clockStatus) === "green");
+  const notStarted = list.filter(row => text(row.clockStatus) === "gray");
+  const overall = !list.length
+    ? "gray"
+    : red.length
+      ? "red"
+      : amber.length
+        ? "amber"
+        : green.length === list.length
+          ? "green"
+          : "gray";
+  const nextDue = list
+    .filter(row => row.nextDueAt)
+    .sort((a, b) => Date.parse(String(a.nextDueAt)) - Date.parse(String(b.nextDueAt)))[0];
+
+  const overallSentence = !list.length
+    ? `No Part 21 evaluation case exists in ${auditId}. No statutory clock has started, and the six branches below are reference only.`
+    : overall === "red"
+      ? `${red.length} case${red.length === 1 ? "" : "s"} in ${auditId} ${red.length === 1 ? "has" : "have"} an overdue or uncomputable statutory clock. Open the case to see the exact branch, due date and missing fact.`
+      : overall === "amber"
+        ? `${amber.length} case${amber.length === 1 ? "" : "s"} in ${auditId} ${amber.length === 1 ? "has" : "have"} a running clock. ${nextDue ? `The nearest branch is ${text(nextDue.nextDueLabel, "the next branch")} due ${formatWhen(nextDue.nextDueAt)} (${daysLabel(nextDue.daysRemaining)}).` : "Review the next due date and pending gates."}`
+        : overall === "green"
+          ? `Every triggered clock in ${auditId} is satisfied and the recorded gates are complete. The case still requires the qualified closure decision shown in the case detail.`
+          : `Cases exist in ${auditId}, but no discovery trigger has started a statutory clock. The branches remain gray until a recorded discovery fact exists.`;
+
   return (
     <div className="view-stack">
       <Panel
-        title="Part 21 statutory branches"
-        subtitle="Six independent, event-triggered branches. Audit start, a Kanban move, a chat message or an approval click never starts or restarts a clock."
-      >
-        <ResourceState resource={verification} />
-        {verified && (
-          <div className="assurance-inline">
-            <Badge tone={verified.allVerified ? "ok" : "danger"}>
-              {verified.allVerified
-                ? `${verified.verified}/${verified.checks?.length ?? 0} citations verified against eCFR`
-                : `${verified.mismatched} mismatch · ${verified.missing} missing`}
-            </Badge>
-            <small>
-              Snapshot {text(verified.snapshotId)} · source as-of{" "}
-              {text(verified.sourceAsOf)} · amended {text(verified.latestAmendedOn)} ·
-              provider current through {text(verified.providerUpToDateAsOf)} ·
-              retrieved {text(verified.retrievedAt)}
-            </small>
-          </div>
-        )}
-        <p className="assurance-note">
-          Section titles below are compared to the exact ingested eCFR text. A
-          mismatch means the displayed citation is stale and must not be shown as
-          current law.
-        </p>
-        <ResourceState resource={process} />
-        {branches.map(branch => (
-          <div className="assurance-record-row" key={String(branch.id)}>
-            <span>
-              <strong>{text(branch.label)}</strong>
-              <small>
-                {text(branch.citation)} · {text(branch.citationTitle)}
-              </small>
-              <small>Trigger: {text(branch.triggerFact)}</small>
-            </span>
-            <Badge>
-              {text(branch.duration?.amount)} {text(branch.duration?.unit)}
-            </Badge>
-          </div>
-        ))}
-      </Panel>
-
-      <Panel
-        title="Evaluation cases in this audit"
-        subtitle="A case is opened on a recorded discovery fact with exact evidence. Opening a second case for the same condition would restart the statutory clock, so the server refuses it."
+        title="Audit clock position"
+        subtitle="Red, amber and green are computed from recorded discovery facts, statutory due dates and gate evidence. The color is an operational position, not a legal determination."
+        actions={
+          <Badge tone={clockTone(overall)}>{clockLabel(overall)}</Badge>
+        }
       >
         <ResourceState resource={cases} />
         {!cases.loading && !cases.error && !list.length && (
           <Empty>
             No Part 21 evaluation case exists in this audit. No clock is started
-            or fabricated.
+            or fabricated. Open a case only when a discovery fact, reviewer and
+            existing evidence are recorded.
           </Empty>
         )}
-        {list.map((row, index) => {
-          const caseId = String(row.caseId ?? "");
-          return (
-            <button
-              className="assurance-record-row"
-              key={caseId || index}
-              onClick={() => setSelectedId(caseId)}
-            >
+        {list.length > 0 && (
+          <>
+            <div className={`clock-rag-banner ${overall}`}>
+              <div>
+                <span className="tiny-label">AUDIT POSITION</span>
+                <strong>{clockLabel(overall)}</strong>
+                <p>{overallSentence}</p>
+              </div>
+              <div className="clock-rag-metrics">
+                <div>
+                  <strong>{list.length}</strong>
+                  <small>cases</small>
+                </div>
+                <div className="red">
+                  <strong>{red.length}</strong>
+                  <small>red</small>
+                </div>
+                <div className="amber">
+                  <strong>{amber.length}</strong>
+                  <small>amber</small>
+                </div>
+                <div className="green">
+                  <strong>{green.length}</strong>
+                  <small>green</small>
+                </div>
+                <div>
+                  <strong>{notStarted.length}</strong>
+                  <small>not started</small>
+                </div>
+              </div>
+            </div>
+            <div className="clock-legend">
               <span>
-                <strong>{caseId || "Case identifier missing"}</strong>
-                <small>
-                  {text(row.title)} · discovery {text(row.createdAt)}
-                </small>
+                <i className="red" /> Red: overdue or cannot compute the due date.
               </span>
-              <Badge tone={row.closed ? "ok" : "warn"}>
-                {row.closed ? "Closed" : "Open"}
-              </Badge>
-            </button>
-          );
-        })}
+              <span>
+                <i className="amber" /> Amber: a clock is running, due within 5
+                days, or a gate is pending.
+              </span>
+              <span>
+                <i className="green" /> Green: triggered clocks satisfied and
+                gates recorded.
+              </span>
+              <span>
+                <i className="gray" /> Gray: no discovery trigger recorded.
+              </span>
+            </div>
+            <div className="clock-case-list">
+              {list.map(row => {
+                const caseId = String(row.caseId ?? "");
+                const status = text(row.clockStatus, "gray");
+                return (
+                  <button
+                    className={`clock-case-card ${status} ${selectedId === caseId ? "active" : ""}`}
+                    key={caseId}
+                    onClick={() => setSelectedId(caseId)}
+                  >
+                    <span className={`clock-case-dot ${status}`} />
+                    <span className="clock-case-body">
+                      <strong>{caseId || "Case identifier missing"}</strong>
+                      <small>{text(row.title, "Title not recorded")}</small>
+                      <small>
+                        {text(row.activeClocks, "0")} active{" "}
+                        {Number(row.activeClocks) === 1 ? "clock" : "clocks"} ·{" "}
+                        {text(row.overdueClocks, "0")} overdue ·{" "}
+                        {text(row.pendingGates, "0")} pending{" "}
+                        {Number(row.pendingGates) === 1 ? "gate" : "gates"}
+                        {row.nextDueAt
+                          ? ` · next ${text(row.nextDueLabel, "branch")} due ${formatWhen(row.nextDueAt)} (${daysLabel(row.daysRemaining)})`
+                          : " · no statutory clock started"}
+                      </small>
+                    </span>
+                    <Badge tone={clockTone(status)}>
+                      {caseStatusLabel(status)}
+                    </Badge>
+                  </button>
+                );
+              })}
+            </div>
+          </>
+        )}
         {canWrite && (
           <JsonOperation
             title="Open a case from a recorded discovery fact"
@@ -156,10 +236,67 @@ export function Clocks({
         )}
       </Panel>
 
+      <Panel
+        title="Statutory branch reference"
+        subtitle="These are the six independent, event-triggered branches and their durations. They are reference law, not a status for this audit."
+      >
+        <ResourceState resource={verification} />
+        {verified && (
+          <div className="assurance-inline">
+            <Badge tone={verified.allVerified ? "ok" : "danger"}>
+              {verified.allVerified
+                ? `${verified.verified}/${verified.checks?.length ?? 0} citations verified against eCFR`
+                : `${verified.mismatched} mismatch · ${verified.missing} missing`}
+            </Badge>
+            <small>
+              Snapshot {text(verified.snapshotId)} · source as-of{" "}
+              {formatDay(verified.sourceAsOf)} · amended{" "}
+              {formatDay(verified.latestAmendedOn)} · provider current through{" "}
+              {formatDay(verified.providerUpToDateAsOf)} · retrieved{" "}
+              {formatWhen(verified.retrievedAt, "retrieval time not recorded")}
+            </small>
+          </div>
+        )}
+        <p className="assurance-note">
+          Section titles below are compared to the exact ingested eCFR text. A
+          mismatch means the displayed citation is stale and must not be shown
+          as current law. The audit position above is computed only from a
+          recorded case, never from this reference list.
+        </p>
+        <ResourceState resource={process} />
+        <details className="clock-reference">
+          <summary>
+            Show the six statutory branches and their durations
+          </summary>
+          {branches.map(branch => (
+            <div className="assurance-record-row" key={String(branch.id)}>
+              <span>
+                <strong>{text(branch.label)}</strong>
+                <small>
+                  {text(branch.citation)} · {text(branch.citationTitle)}
+                </small>
+                <small>Trigger: {text(branch.triggerFact)}</small>
+              </span>
+              <Badge>
+                {text(branch.duration?.amount)} {text(branch.duration?.unit)}
+              </Badge>
+            </div>
+          ))}
+        </details>
+      </Panel>
+
       {detail.data && (
         <Panel
           title={`Case ${selectedId}`}
           subtitle="Dates are computed from the recorded trigger facts under the declared calendar. A calendar that is not approved for reliance is illustrative and is not a legal determination."
+          actions={
+            <button
+              className="ghost-button"
+              onClick={() => setSelectedId("")}
+            >
+              Close case detail
+            </button>
+          }
         >
           <div className="assurance-inline">
             <label>
@@ -196,10 +333,14 @@ export function Clocks({
                 </Badge>
               </div>
               <p>
-                {text(branch.citation)} · trigger {text(branch.triggerAt)} · due{" "}
-                {text(branch.dueAt)} · {daysLabel(branch.daysRemaining)}
+                {text(branch.citation)} · trigger{" "}
+                {formatWhen(branch.triggerAt, "not triggered")} · due{" "}
+                {formatWhen(branch.dueAt, "not computed")} ·{" "}
+                {daysLabel(branch.daysRemaining)}
               </p>
-              <small>{text(branch.explanation, "No computation basis returned")}</small>
+              <small>
+                {text(branch.explanation, "No computation basis returned")}
+              </small>
             </div>
           ))}
           <h3>Human gates</h3>

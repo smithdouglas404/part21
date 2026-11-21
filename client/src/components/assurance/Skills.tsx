@@ -44,6 +44,7 @@ export function Skills({
   const library = useResource("/api/nuclear/skills");
   const configuredPhases = useConfigurations("skill");
   const activity = useResource(scoped("/api/agentkit/activity", auditId));
+  const board = useResource(scoped("/api/kanban", auditId));
   const [selectedId, setSelectedId] = useState("");
   const [answers, setAnswers] = useState<Record<string, any>>({});
   const [phase, setPhase] = useState("");
@@ -97,6 +98,45 @@ export function Skills({
         ),
       ].map(name => ({ id: name, label: name }));
   const runs = rows(activity.data, "runs", "activity", "agents", "items");
+  const baselineCards = rows(board.data, "items")
+    .filter(item =>
+      String(item.sourceRecordId ?? "").startsWith("AUDIT-BASELINE:")
+    )
+    .sort(
+      (a, b) =>
+        (Number.parseInt(String(a.title), 10) || 0) -
+        (Number.parseInt(String(b.title), 10) || 0)
+    );
+  const phaseState = (index: number) => {
+    const card = baselineCards[index];
+    if (!card) return { tone: "gray", label: "Not started", skill: "" };
+    const activation = (card.skillActivation ?? {}) as Row;
+    const completion = Number(activation.completion ?? 0);
+    const runStatus = String(activation.runStatus ?? "");
+    const skill = String(card.activeSkillId ?? "No skill bound");
+    if (card.status === "blocked" || runStatus === "failed")
+      return { tone: "red", label: "Blocked", skill };
+    if (runStatus === "ready_for_human_gate" && completion >= 100)
+      return {
+        tone: "green",
+        label: `Skill complete · ${completion}% · human gate pending`,
+        skill,
+      };
+    if (
+      activation.status === "executed" ||
+      card.status === "in_progress" ||
+      card.status === "review"
+    )
+      return {
+        tone: "amber",
+        label:
+          activation.status === "executed"
+            ? `More context required${completion ? ` · ${completion}%` : ""}`
+            : "Skill active · questions pending",
+        skill,
+      };
+    return { tone: "gray", label: "Not started", skill };
+  };
   useEffect(() => {
     setAnswers({});
   }, [selectedId, findingId]);
@@ -118,27 +158,50 @@ export function Skills({
       <Panel
         title="Audit phase flow / PERT"
         subtitle="Phases and dependencies are read from controlled configuration. Presence in the library does not mean executed or complete."
+        actions={
+          <Badge>
+            {baselineCards.filter(
+              card =>
+                (card.skillActivation as Row | undefined)?.runStatus ===
+                "ready_for_human_gate"
+            ).length}{" "}
+            complete ·{" "}
+            {baselineCards.filter(
+              card =>
+                card.status === "in_progress" ||
+                (card.skillActivation as Row | undefined)?.status === "executed"
+            ).length}{" "}
+            active
+          </Badge>
+        }
       >
         <ResourceState resource={configuredPhases} />
+        <ResourceState resource={board} />
         <div className="assurance-phase-flow">
-          {phases.map((p, index) => (
-            <div className="assurance-phase-unit" key={id(p) || index}>
-              <button
-                className={`assurance-phase ${phase === id(p) ? "active" : ""}`}
-                onClick={() => setPhase(phase === id(p) ? "" : id(p))}
-              >
-                <Workflow size={15} />
-                <strong>{label(p)}</strong>
-                <small>{text(p.description, "Configured phase")}</small>
-                <span>
-                  Execution state: {text(p.status, "Not established")}
-                </span>
-              </button>
-              {index < phases.length - 1 && (
-                <span className="assurance-phase-arrow">→</span>
-              )}
-            </div>
-          ))}
+          {phases.map((p, index) => {
+            const state = phaseState(index);
+            return (
+              <div className="assurance-phase-unit" key={id(p) || index}>
+                <button
+                  className={`assurance-phase ${phase === id(p) ? "active" : ""} ${state.tone}`}
+                  onClick={() => setPhase(phase === id(p) ? "" : id(p))}
+                >
+                  <Workflow size={15} />
+                  <strong>{label(p)}</strong>
+                  <small>{text(p.description, "Configured phase")}</small>
+                  <small>
+                    Governed skill: {state.skill || "not bound"}
+                  </small>
+                  <span className={`phase-state ${state.tone}`}>
+                    {state.label}
+                  </span>
+                </button>
+                {index < phases.length - 1 && (
+                  <span className="assurance-phase-arrow">→</span>
+                )}
+              </div>
+            );
+          })}
         </div>
         {!phases.length && !configuredPhases.loading && (
           <Empty>No phase flow is configured.</Empty>

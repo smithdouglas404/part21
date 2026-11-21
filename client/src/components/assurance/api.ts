@@ -172,6 +172,34 @@ export function text(value: unknown, fallback = "Unknown"): string {
       ? JSON.stringify(value)
       : String(value);
 }
+export function formatWhen(
+  value: unknown,
+  fallback = "time not recorded"
+): string {
+  if (value === undefined || value === null || value === "") return fallback;
+  const date = new Date(String(value));
+  if (Number.isNaN(date.getTime())) return text(value, fallback);
+  return new Intl.DateTimeFormat("en-GB", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    timeZone: "UTC",
+    timeZoneName: "short",
+  }).format(date);
+}
+export function formatDay(value: unknown, fallback = "date not recorded"): string {
+  if (value === undefined || value === null || value === "") return fallback;
+  const date = new Date(String(value));
+  if (Number.isNaN(date.getTime())) return text(value, fallback);
+  return new Intl.DateTimeFormat("en-GB", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+    timeZone: "UTC",
+  }).format(date);
+}
 export function errorText(error: unknown) {
   return error instanceof Error ? error.message : String(error);
 }

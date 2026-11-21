@@ -198,7 +198,12 @@ export function createDomainStore(dependencies: { database: () => StoreSqlDataba
     const [findings, evidence, controls, sources, metrics, suppliers, changes] = await Promise.all([
       listDomainRecords("finding", auditId), listDomainRecords("evidence", auditId), listDomainRecords("control", auditId), listDomainRecords("source", auditId), getDomainRecordScoped("metric", auditId, auditId), listDomainRecords("supplier", auditId), listDomainRecords("change", auditId),
     ]);
-    return { source: "mysql-database", audit, findings, evidence, controls, sources, metrics, suppliers, changes, supplierProjection: { source: "part21_domain_records audit-scoped supplier records", count: suppliers.length, sharedGraphSuppliersMerged: false, explicitGraphHelper: "listAuditSupplierProjection" } };
+    const auditWithCounts = {
+      ...audit,
+      findings: findings.length,
+      evidence: `${evidence.length} linked database records`,
+    };
+    return { source: "mysql-database", audit: auditWithCounts, findings, evidence, controls, sources, metrics, suppliers, changes, supplierProjection: { source: "part21_domain_records audit-scoped supplier records", count: suppliers.length, sharedGraphSuppliersMerged: false, explicitGraphHelper: "listAuditSupplierProjection" } };
   }
   async function listAudits() {
     const db = dependencies.database();

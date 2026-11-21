@@ -32,6 +32,25 @@ export function selectGovernedSkill(rows: GovernedSkill[], input: Pick<AuditSkil
   return row;
 }
 
+/**
+ * A missing reviewed policy baseline is a qualified-human governance condition,
+ * not an incomplete auditor answer. Keep it visible as an advisory while still
+ * allowing the governed skill contract itself to complete.
+ */
+function isPolicyGovernanceAdvisory(message: string): boolean {
+  return /^policy\./i.test(message) || /policy baseline/i.test(message);
+}
+
+function evidenceMatchesFinding(row: Record<string, any>, findingId: string): boolean {
+  if (row.findingId === findingId || row.linkedFinding === findingId) return true;
+  if (Array.isArray(row.findingIds) && row.findingIds.includes(findingId)) return true;
+  if (Array.isArray(row.linkedTo) && row.linkedTo.includes(findingId)) return true;
+  if (typeof row.linkedTo === "string") {
+    return row.linkedTo.split(/[^A-Za-z0-9-]+/).filter(Boolean).includes(findingId);
+  }
+  return false;
+}
+
 /** Explicit executable handlers. Route strings alone are never execution evidence. */
 const graphHandler = async (input: AuditSkillInput, tools: SkillTools) => { await tools.portfolio(); await tools.graph(); await tools.evidence(); };
 const policyHandler = async (input: AuditSkillInput, tools: SkillTools) => { await graphHandler(input, tools); await tools.policy(); };
@@ -56,6 +75,87 @@ const routeHandlers: Readonly<Record<string, typeof graphHandler>> = Object.free
 export function getExecutableSkillRoutes(): readonly string[] { return Object.keys(routeHandlers); }
 interface SkillTools { portfolio(): Promise<void>; graph(): Promise<void>; evidence(): Promise<void>; policy(): Promise<void> }
 
+function skillNarrative(input: AuditSkillInput, skill: AuditSkill, row: { version: string }, context: {
+  portfolio: Awaited<ReturnType<AgentServices["portfolio"]>> | null;
+  graph: AgentGraph | null;
+  policy: Record<string, any> | null;
+  evidence: Record<string, any>[];
+  checked: ReturnType<typeof validateSkillAnswers>;
+  requiredEvidence: { requirement: string; evidenceIds: string[]; status: string }[];
+  followUpQuestions: string[];
+  unknowns: string[];
+}) {
+  const audit = context.portfolio?.audit as Record<string, any> | undefined;
+  const subject = input.findingId
+    ? `finding ${input.findingId}`
+    : `audit ${input.auditId}`;
+  const auditLabel = audit?.title ? ` (${String(audit.title)})` : "";
+  const paragraphs: string[] = [];
+  paragraphs.push(
+    `${skill.name} reviewed ${subject}${auditLabel} against the governed ${skill.id} contract at revision ${row.version}.`
+  );
+  if (context.graph) {
+    const nodes = context.graph.nodes.length;
+    const edges = context.graph.edges.length;
+    const events = context.graph.temporalEvents.length;
+    paragraphs.push(
+      `The agent traversed the audit-scoped knowledge graph and returned ${nodes} nodes, ${edges} relationships, and ${events} temporal events. That means the observations are tied to persisted finding, product, supplier, evidence, and event records rather than to free text or a static fixture.`
+    );
+  } else {
+    paragraphs.push(
+      `The agent did not receive a finding-linked graph projection, so it has not asserted a genealogy conclusion. The run is deliberately limited to the audit portfolio until a persisted finding is selected.`
+    );
+  }
+  if (context.policy) {
+    const counts = context.policy.counts ?? {};
+    paragraphs.push(
+      `Deterministic policy evaluation returned ${Number(counts.total ?? 0)} rules: ${Number(counts.pass ?? 0)} passed, ${Number(counts.fail ?? 0)} failed, ${Number(counts.unknown ?? 0)} remained unknown, and ${Number(counts.not_applicable ?? 0)} were not applicable. These are rule results for review, not a regulatory verdict.`
+    );
+  } else if (context.unknowns.some(item => /policy baseline/i.test(item))) {
+    paragraphs.push(
+      `Policy evaluation could not complete because ${input.auditId} has no pinned reviewed policy baseline. A qualified quality manager must pin the approved Part 21 policy revision before the policy result can be used as audit evidence. This is a recorded human decision, not an agent conclusion.`
+    );
+  } else {
+    paragraphs.push(
+      `Policy evaluation was not available for this run, so no policy pass or failure is claimed. The policy tool result is recorded as unknown in the trace.`
+    );
+  }
+  if (context.evidence.length) {
+    const satisfied = context.requiredEvidence.filter(item => item.status === "present").length;
+    paragraphs.push(
+      `The run resolved ${context.evidence.length} existing evidence ${context.evidence.length === 1 ? "record" : "records"}. ${
+        satisfied
+          ? `${satisfied} of ${context.requiredEvidence.length} evidence requirements are satisfied by records linked to ${subject}.`
+          : `None of the selected records is linked to ${subject}, so no evidence requirement is satisfied yet.`
+      }`
+    );
+  } else {
+    paragraphs.push(
+      `No existing evidence record was bound to the skill, so the evidence requirements remain open and must not be described as satisfied.`
+    );
+  }
+  const missingEvidence = context.requiredEvidence.filter(item => item.status !== "present").map(item => item.requirement);
+  if (missingEvidence.length) {
+    paragraphs.push(
+      `The evidence contract is still open for ${missingEvidence.join(", ")}. The accountable auditor should attach or link the existing records before this card advances.`
+    );
+  }
+  if (context.checked.missing.length) {
+    paragraphs.push(
+      `The auditor still needs to answer ${context.checked.missing.length} required ${context.checked.missing.length === 1 ? "question" : "questions"}: ${context.checked.missing.map(item => item.prompt).join(" ")}`
+    );
+  }
+  if (context.followUpQuestions.length) {
+    paragraphs.push(
+      `The next questions to resolve are: ${context.followUpQuestions.join(" ")}`
+    );
+  }
+  paragraphs.push(
+    `Recommended next action: the accountable audit lead should review the graph-linked evidence, resolve the open questions, and record a disposition with the named owner. The human gate remains pending: ${skill.humanGate}. No Part 21 reportability, compliance, or closure decision has been issued by the agent.`
+  );
+  return paragraphs.join(" ");
+}
+
 async function executeSkill(input: AuditSkillInput, services: AgentServices, persist: boolean) {
   requireAgentScope(input, persist ? "agent:write" : "agent:read");
   const row = selectGovernedSkill(await services.skills(input.mode === "preview"), input);
@@ -64,6 +164,7 @@ async function executeSkill(input: AuditSkillInput, services: AgentServices, per
   const traceId = services.id();
   const toolCalls: AgentToolCall[] = [];
   const unknowns: string[] = [];
+  const advisories: string[] = [];
   let graph: AgentGraph | null = null;
   let policy: Record<string, any> | null = null;
   let evidence: Record<string, any>[] = [];
@@ -125,18 +226,25 @@ async function executeSkill(input: AuditSkillInput, services: AgentServices, per
     else { dispatched = true; await handler(input, tools); }
     const requiredEvidence = (skill.requiredEvidence ?? []).map(requirement => {
       const ids = input.evidenceBindings?.[requirement] ?? [];
-      const linked = evidence.filter(row => ids.includes(row.id) && (!input.findingId || row.findingId === input.findingId || Array.isArray(row.findingIds) && row.findingIds.includes(input.findingId) || Array.isArray(row.linkedTo) && row.linkedTo.includes(input.findingId)));
+      const linked = evidence.filter(row => ids.includes(row.id) && (!input.findingId || evidenceMatchesFinding(row, input.findingId)));
       return { requirement, evidenceIds: linked.map(row => row.id), status: linked.length === ids.length && linked.length > 0 ? "present" : "unknown" };
     });
     for (const missing of requiredEvidence.filter(row => row.status === "unknown")) unknowns.push(`Missing verified evidence: ${missing.requirement}`);
     for (const missing of checked.missing) unknowns.push(`Required answer missing/invalid: ${missing.id}`);
+    // A missing policy baseline is a governance condition reserved for a
+    // qualified human reviewer. It must be disclosed, but it does not make the
+    // auditor's skill answers or evidence incomplete.
+    for (const item of unknowns.filter(isPolicyGovernanceAdvisory)) advisories.push(item);
+    const blockers = unknowns.filter(item => !isPolicyGovernanceAdvisory(item));
     const preview = input.mode === "preview";
-    const status = preview ? "draft_preview" : unknowns.length ? "needs_more_context" : "ready_for_human_gate";
+    const status = preview ? "draft_preview" : blockers.length ? "needs_more_context" : "ready_for_human_gate";
     const followUpQuestions = [...checked.missing.map(row => row.prompt), ...requiredEvidence.filter(row => row.status === "unknown").map(row => `Which existing evidence record supports ${row.requirement}?`)];
+    const recommendation = skillNarrative(input, skill, row, { portfolio, graph, policy, evidence, checked, requiredEvidence, followUpQuestions, unknowns: [...blockers, ...advisories] });
     const result = {
       ...run, status, completedAt: services.now(), appliedSkill: { id: skill.id, name: skill.name, version: row.version, sourceSha256: row.sourceSha256, configurationStatus: row.status, kind: row.kind, contract: skill, regulatoryApproval: preview ? "not_approved_for_runtime" : "governed_configuration_only_not_a_verdict" },
-      route: skill.route, agent: skill.agent, agentDispatched: dispatched, routeExecuted: dispatched && toolCalls.some(row => row.status === "completed"), skillContract: skill, completion: checked.completion, requirements: checked.requirements, requiredEvidence, unknowns, nextQuestions: checked.missing.map(row => row.id), followUpQuestions,
-      recommendation: unknowns.length ? "Evidence is incomplete. Use the source-linked questions; no regulatory conclusion is available." : "Tool results are available for qualified human review; no regulatory conclusion has been approved.",
+      route: skill.route, agent: skill.agent, agentDispatched: dispatched, routeExecuted: dispatched && toolCalls.some(row => row.status === "completed"), skillContract: skill, completion: checked.completion, requirements: checked.requirements, requiredEvidence, unknowns: blockers, nextQuestions: checked.missing.map(row => row.id), followUpQuestions,
+      advisories,
+      recommendation,
       verdict: "unknown" as const, sources: sourceIds, sourceIds, graph: graph as AgentGraph | null, policy: policy as Record<string, any> | null, grounding: { source: "mysql-database", auditId: input.auditId, findingId: input.findingId ?? null, graphTraversed: graph !== null, ontologyVersion: (graph as AgentGraph | null)?.ontologyVersion ?? null, nodeCount: (graph as AgentGraph | null)?.nodes.length ?? 0, edgeCount: (graph as AgentGraph | null)?.edges.length ?? 0, temporalEventCount: (graph as AgentGraph | null)?.temporalEvents.length ?? 0, sourceIds }, traversalProof: (graph as AgentGraph | null)?.traversalProof ?? null,
       humanReviewRequired: true, humanGate: { gate: skill.humanGate, status: "pending", approvalDecisionId: null, finalVerdict: "not_issued" },
     };

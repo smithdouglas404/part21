@@ -6,6 +6,7 @@ import {
   Empty,
   EndpointPanel,
   ErrorNotice,
+  HumanDetail,
   Json,
   JsonOperation,
   Panel,
@@ -35,10 +36,12 @@ export function Identity({ principal }: { principal: Principal }) {
       title="Authenticated identity & permissions"
       subtitle="Lens selection changes presentation only. Permissions, audit membership and qualification come from the server."
     >
-      <Json
-        value={principal}
-        title="Actual session principal, role IDs and audit qualification"
-        open
+      <HumanDetail
+        value={{
+          ...principal,
+          principalId: principal.id,
+          summary: `${principal.actor} is signed in with ${principal.roleIds?.length ? principal.roleIds.join(", ") : "no assigned role"}. Access is ${principal.access === "make_changes" ? "make changes" : "look only"}. Nuclear qualification is ${principal.qualified ? "recorded" : "not recorded for this principal"}; administrator status does not grant it.`,
+        }}
       />
     </Panel>
   );

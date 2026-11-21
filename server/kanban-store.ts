@@ -3,7 +3,8 @@ import { getEvidenceRuntime, type EvidenceVaultService, type EvidencePrincipal }
 import { decodeEvidenceBase64, required, type EvidenceTransaction } from "./vault/types";
 
 export type KanbanStatus = "backlog" | "in_progress" | "blocked" | "review" | "final";
-export type KanbanItem = { id: string; auditId: string; title: string; description: string; status: KanbanStatus; priority: "low" | "medium" | "high" | "critical"; attention: boolean; source: "field" | "agent" | "audit"; ownerPersonId?: string; findingId?: string; productId?: string; sourceRecordId?: string; conversationId?: string; skillIds?: string[]; activeSkillId?: string; observedAt?: string; baselinePhase?: string; baselineProfileId?: string; baselineProfileVersion?: string; createdBy: string; createdAt: string; updatedAt: string; attachmentIds: string[]; recordRevision?: number };
+export type KanbanSkillActivation = { skillId: string; skillVersion: string; skillName: string; status: "questions_pending" | "executed"; activatedAt: string; activatedBy: string; questions: unknown[]; requiredEvidence?: unknown[]; humanGate?: string; traceId?: string; completion?: number; runStatus?: string; answers?: Record<string, unknown>; evidenceBindings?: Record<string, string[]>; advisories?: string[] };
+export type KanbanItem = { id: string; auditId: string; title: string; description: string; status: KanbanStatus; priority: "low" | "medium" | "high" | "critical"; attention: boolean; source: "field" | "agent" | "audit"; ownerPersonId?: string; findingId?: string; productId?: string; sourceRecordId?: string; conversationId?: string; skillIds?: string[]; activeSkillId?: string; skillVersion?: string; skillStatus?: "questions_pending" | "executed"; skillActivation?: KanbanSkillActivation; traceId?: string; observedAt?: string; baselinePhase?: string; baselineProfileId?: string; baselineProfileVersion?: string; createdBy: string; createdAt: string; updatedAt: string; attachmentIds: string[]; recordRevision?: number };
 export type KanbanAttachment = { id: string; itemId: string; auditId: string; filename: string; mediaType: string; kind: "photo" | "document" | "voice"; sizeBytes: number; sha256: string; transcript?: string; createdBy: string; createdAt: string; assetId?: string; assetRevision?: number; representation?: "original" | "derivative"; originalStatus?: "present" | "original_missing"; storageStatus?: string; recordRevision?:number };
 export type KanbanCommunication = { id: string; itemId: string; auditId: string; conversationId: string; role: "user" | "agent" | "system"; actor: string; text: string; skillIds: string[]; skillRevisions?: { id:string;revision:string }[]; sourceIds?:string[]; traceId?:string; channel?:string; createdAt: string; itemRevision?:number; recordRevision?:number; skillRevisionStatus?:"provided"|"unknown" };
 export type KanbanCreateInput = Partial<KanbanItem> & { auditId: string; createdBy: string };
@@ -61,6 +62,40 @@ export function createKanbanService(vault: EvidenceVaultService) {
         const item = await card(tx,itemId,auditId!,true);
         const updated = await tx.putRecord("kanban_item",itemId,auditId!,{ ...item,status,attention:true },actor,expectedRevision) as KanbanItem;
         const event = await tx.appendEvent({ type:"kanban_item_moved",actor,auditId:auditId!,entityId:itemId,revision:updated.recordRevision!,payload:{ from:item.status,to:status,reason:reason ?? null,recordRevision:updated.recordRevision,clockReset:false,skillExecuted:false } });
+        return { ok:true,item:updated,event,source:"mysql-domain-records" };
+      });
+    },
+    async activateKanbanSkill(itemId:string,auditId:string,actor:string,activation:KanbanSkillActivation,principal?:EvidencePrincipal) {
+      await vault.authorize(auditId,"write",principal ?? { id:actor });
+      return vault.deps.repository.transaction(async tx => {
+        const item = await card(tx,itemId,auditId,true);
+        const updated = await tx.putRecord("kanban_item",itemId,auditId,{
+          ...item,
+          activeSkillId: activation.skillId,
+          skillIds: [...new Set([...(item.skillIds ?? []), activation.skillId])],
+          skillVersion: activation.skillVersion,
+          skillStatus: activation.status,
+          skillActivation: activation,
+          attention: true,
+        },actor,item.recordRevision) as KanbanItem;
+        const event = await tx.appendEvent({ type:"kanban_skill_activated",actor,auditId,entityId:itemId,revision:updated.recordRevision!,payload:{ skillId:activation.skillId,skillVersion:activation.skillVersion,status:activation.status,questions:activation.questions.length,humanGate:activation.humanGate ?? null,recordRevision:updated.recordRevision } });
+        return { ok:true,item:updated,event,source:"mysql-domain-records" };
+      });
+    },
+    async recordKanbanSkillRun(itemId:string,auditId:string,actor:string,result:{traceId:string;skillId:string;skillVersion?:string;status:string;completion?:number;answers?:Record<string,unknown>;evidenceBindings?:Record<string,string[]>;advisories?:string[]},principal?:EvidencePrincipal) {
+      await vault.authorize(auditId,"write",principal ?? { id:actor });
+      return vault.deps.repository.transaction(async tx => {
+        const item = await card(tx,itemId,auditId,true);
+        const activation = item.skillActivation ? { ...item.skillActivation, status: "executed" as const, traceId: result.traceId, completion: result.completion, runStatus: result.status, answers: result.answers ?? {}, evidenceBindings: result.evidenceBindings ?? {}, advisories: result.advisories ?? [] } : undefined;
+        const updated = await tx.putRecord("kanban_item",itemId,auditId,{
+          ...item,
+          skillStatus: "executed",
+          skillVersion: result.skillVersion ?? item.skillVersion,
+          skillActivation: activation,
+          traceId: result.traceId,
+          attention: result.status !== "ready_for_human_gate",
+        },actor,item.recordRevision) as KanbanItem;
+        const event = await tx.appendEvent({ type:"kanban_skill_run_recorded",actor,auditId,entityId:itemId,revision:updated.recordRevision!,payload:{ traceId:result.traceId,skillId:result.skillId,skillVersion:result.skillVersion ?? null,status:result.status,completion:result.completion ?? null,answers:result.answers ?? {},evidenceBindings:result.evidenceBindings ?? {},advisories:result.advisories ?? [],humanReviewRequired:true,recordRevision:updated.recordRevision } });
         return { ok:true,item:updated,event,source:"mysql-domain-records" };
       });
     },
@@ -125,5 +160,7 @@ export const listKanbanItems = (auditId:string,principal?:EvidencePrincipal) => 
 export const createKanbanItem = (input:KanbanCreateInput, principal?:EvidencePrincipal) => createKanbanService(getEvidenceRuntime()).createKanbanItem(input, principal);
 /** Legacy 3-argument calls remain import-compatible but throw: explicit audit scope is mandatory. */
 export const moveKanbanItem = (itemId:string,status:KanbanStatus,actor:string,auditId?:string,expectedRevision?:number,reason?:string,principal?:EvidencePrincipal) => createKanbanService(getEvidenceRuntime()).moveKanbanItem(itemId,status,actor,auditId,expectedRevision,reason,principal);
+export const activateKanbanSkill = (itemId:string,auditId:string,actor:string,activation:KanbanSkillActivation,principal?:EvidencePrincipal) => createKanbanService(getEvidenceRuntime()).activateKanbanSkill(itemId,auditId,actor,activation,principal);
+export const recordKanbanSkillRun = (itemId:string,auditId:string,actor:string,result:{traceId:string;skillId:string;skillVersion?:string;status:string;completion?:number;answers?:Record<string,unknown>;evidenceBindings?:Record<string,string[]>;advisories?:string[]},principal?:EvidencePrincipal) => createKanbanService(getEvidenceRuntime()).recordKanbanSkillRun(itemId,auditId,actor,result,principal);
 export const appendKanbanCommunication = (input:KanbanCommunicationInput, principal?:EvidencePrincipal) => createKanbanService(getEvidenceRuntime()).appendKanbanCommunication(input, principal);
 export const attachKanbanAsset = (input:KanbanAssetInput, principal?:EvidencePrincipal) => createKanbanService(getEvidenceRuntime()).attachKanbanAsset(input, principal);

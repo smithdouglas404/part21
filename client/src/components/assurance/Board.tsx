@@ -5,8 +5,10 @@ import {
   MessageSquare,
   Mic,
   Paperclip,
+  Play,
   Plus,
   RefreshCw,
+  ShieldCheck,
   Square,
   Workflow,
 } from "lucide-react";
@@ -22,6 +24,7 @@ import {
 import {
   download,
   fileBase64,
+  formatWhen,
   id,
   label,
   payload,
@@ -51,6 +54,427 @@ export function assetId(row: Row) {
       row.evidenceAssetId ??
       row.originalAssetId ??
       ""
+  );
+}
+
+function hasSkillAnswer(value: unknown): boolean {
+  if (typeof value === "string") return value.trim().length > 0;
+  if (Array.isArray(value)) return value.length > 0 && value.every(hasSkillAnswer);
+  return typeof value === "boolean" || (typeof value === "number" && Number.isFinite(value));
+}
+
+function skillStateLabel(value: unknown) {
+  const state = String(value ?? "").trim();
+  if (state === "questions_pending") return "Questions pending";
+  if (state === "executed") return "Trace recorded";
+  if (state === "needs_more_context") return "More context required";
+  if (state === "ready_for_human_gate") return "Ready for human review";
+  if (state === "failed") return "Run failed";
+  return state ? state.replaceAll("_", " ") : "Awaiting activation";
+}
+
+function baselineSignal(card: Row): {
+  tone: "red" | "amber" | "green" | "gray";
+  label: string;
+  percent: number;
+  detail: string;
+} {
+  const activation = card.skillActivation as Row | undefined;
+  const completion = Math.max(
+    0,
+    Math.min(100, Number(activation?.completion ?? 0))
+  );
+  const runStatus = String(activation?.runStatus ?? "");
+  const status = String(card.status ?? "backlog");
+  if (status === "blocked" || runStatus === "failed")
+    return {
+      tone: "red",
+      label: "Red · blocked",
+      percent: completion,
+      detail:
+        "The phase is blocked or its skill failed. Open the card to see the missing fact or evidence.",
+    };
+  if (runStatus === "ready_for_human_gate" && completion >= 100)
+    return {
+      tone: "green",
+      label: "Green · skill complete",
+      percent: 100,
+      detail:
+        "The governed questions and evidence are complete. A qualified human gate still applies before the phase is closed.",
+    };
+  if (
+    activation?.status === "executed" ||
+    status === "in_progress" ||
+    status === "review"
+  )
+    return {
+      tone: "amber",
+      label:
+        activation?.status === "executed"
+          ? "Amber · more context"
+          : "Amber · in progress",
+      percent: completion,
+      detail:
+        activation?.status === "executed"
+          ? "The skill has run but still needs context, evidence or a human gate."
+          : "The governed skill is active. Answer its questions and run the check to complete the phase.",
+    };
+  return {
+    tone: "gray",
+    label: "Gray · not started",
+    percent: 0,
+    detail:
+      "Move the card out of Backlog to activate its governed skill and questions.",
+  };
+}
+
+function CardSkillCheck({
+  auditId,
+  item,
+  canWrite,
+  refresh,
+  skillMeta,
+}: {
+  auditId: string;
+  item: Row;
+  canWrite: boolean;
+  refresh: () => void;
+  skillMeta: Map<string, { name: string; version: string }>;
+}) {
+  const action = useAction();
+  const activation = item.skillActivation as Row | undefined;
+  const questions = Array.isArray(activation?.questions)
+    ? (activation!.questions as Row[])
+    : [];
+  const skillId = String(activation?.skillId ?? item.activeSkillId ?? "").trim();
+  const skillVersion = String(
+    activation?.skillVersion ?? item.skillVersion ?? ""
+  ).trim();
+  const skillName =
+    text(activation?.skillName) ||
+    skillMeta.get(skillId)?.name ||
+    skillId ||
+    "No governed skill bound";
+  const evidenceRegister = useResource(scoped("/api/evidence/records", auditId));
+  const existingEvidence = rows(evidenceRegister.data, "evidence", "items");
+  const requirements = Array.isArray(activation?.requiredEvidence)
+    ? (activation!.requiredEvidence as unknown[]).map(value => String(value))
+    : [];
+  const persistedAnswers =
+    activation?.answers && typeof activation.answers === "object"
+      ? (activation.answers as Record<string, unknown>)
+      : {};
+  const persistedBindings =
+    activation?.evidenceBindings &&
+    typeof activation.evidenceBindings === "object"
+      ? (activation.evidenceBindings as Record<string, string[]>)
+      : {};
+  const [answers, setAnswers] =
+    useState<Record<string, unknown>>(persistedAnswers);
+  const [evidenceBindings, setEvidenceBindings] = useState<
+    Record<string, string[]>
+  >(persistedBindings);
+  const [result, setResult] = useState<Row | null>(null);
+  useEffect(() => {
+    setAnswers(persistedAnswers);
+    setEvidenceBindings(persistedBindings);
+  }, [item.traceId, activation?.traceId]);
+  const linkedEvidenceCount = new Set(
+    Object.values(evidenceBindings).flat()
+  ).size;
+  const missing = questions.filter(
+    question => question.required && !hasSkillAnswer(answers[String(question.id)])
+  );
+  if (!skillId) {
+    return (
+      <div className="card-skill-check card-skill-empty">
+        <span className="tiny-label">GOVERNED SKILL CHECK</span>
+        <p>
+          This card has no governed skill bound. Add a finding-linked card or
+          assign a skill before using the stage move as evidence of completion.
+        </p>
+      </div>
+    );
+  }
+  return (
+    <div className="card-skill-check">
+      <div className="card-skill-head">
+        <div>
+          <span className="tiny-label">GOVERNED SKILL CHECK</span>
+          <strong>{skillName}</strong>
+          <small>
+            {skillVersion || "Revision recorded in the skill library"} ·{" "}
+            {skillStateLabel(activation?.status)}
+          </small>
+        </div>
+        <Badge>
+          <ShieldCheck size={11} /> Human gate
+        </Badge>
+      </div>
+      {!activation && (
+        <p className="card-skill-guidance">
+          Moving this card out of Backlog activates the skill and brings its
+          questions here. The questions are loaded from the governed contract,
+          not written by this screen.
+        </p>
+      )}
+      {activation && (
+        <>
+          <p className="card-skill-guidance">
+            {text(
+              activation.humanGate,
+              "A qualified reviewer must approve the result before it is used as a finding or closure decision."
+            )}
+          </p>
+          {Array.isArray(activation.advisories) &&
+            activation.advisories.length > 0 && (
+              <div className="card-skill-advisory">
+                <strong>Open governance condition</strong>
+                <ul>
+                  {activation.advisories.map((advisory: unknown, index: number) => (
+                    <li key={index}>{text(advisory)}</li>
+                  ))}
+                </ul>
+                <small>
+                  This condition is reserved for a qualified human reviewer. It
+                  does not mean the auditor left a required answer blank.
+                </small>
+              </div>
+            )}
+          {questions.length === 0 && (
+            <p className="card-skill-guidance">
+              This skill has no required questions. Run the check to record a
+              trace against the card.
+            </p>
+          )}
+          {questions.map(question => {
+            const questionId = String(question.id ?? "");
+            const value = answers[questionId];
+            return (
+              <label className="card-skill-question" key={questionId}>
+                <span>
+                  {text(question.prompt, questionId)}
+                  {question.required ? " *" : ""}
+                </span>
+                {text(question.helper) && <small>{text(question.helper)}</small>}
+                {question.input === "choice" &&
+                Array.isArray(question.options) ? (
+                  <select
+                    value={String(value ?? "")}
+                    onChange={event =>
+                      setAnswers(previous => ({
+                        ...previous,
+                        [questionId]: event.target.value,
+                      }))
+                    }
+                  >
+                    <option value="">Select an answer</option>
+                    {question.options.map((option: unknown) => (
+                      <option key={text(option)} value={text(option)}>
+                        {text(option)}
+                      </option>
+                    ))}
+                  </select>
+                ) : question.input === "checklist" &&
+                  Array.isArray(question.options) ? (
+                  <span className="card-skill-checklist">
+                    {question.options.map((option: unknown) => {
+                      const optionValue = text(option);
+                      const selected = Array.isArray(value)
+                        ? value.map(String).includes(optionValue)
+                        : false;
+                      return (
+                        <label key={optionValue}>
+                          <input
+                            type="checkbox"
+                            checked={selected}
+                            onChange={event =>
+                              setAnswers(previous => {
+                                const current = Array.isArray(previous[questionId])
+                                  ? previous[questionId].map(String)
+                                  : [];
+                                return {
+                                  ...previous,
+                                  [questionId]: event.target.checked
+                                    ? [...current, optionValue]
+                                    : current.filter(item => item !== optionValue),
+                                };
+                              })
+                            }
+                          />
+                          {optionValue}
+                        </label>
+                      );
+                    })}
+                  </span>
+                ) : (
+                  <textarea
+                    rows={2}
+                    value={String(value ?? "")}
+                    onChange={event =>
+                      setAnswers(previous => ({
+                        ...previous,
+                        [questionId]: event.target.value,
+                      }))
+                    }
+                  />
+                )}
+                {text(question.evidenceHint) && (
+                  <small className="card-skill-evidence">
+                    Evidence hint: {text(question.evidenceHint)}
+                  </small>
+                )}
+              </label>
+            );
+          })}
+          {requirements.length > 0 && (
+            <details className="card-evidence-bindings">
+              <summary>
+                Link existing evidence
+                <span>
+                  {linkedEvidenceCount} of {requirements.length} requirements
+                  selected
+                </span>
+              </summary>
+              <p>
+                Select only records that already exist in {auditId}. The skill
+                marks a requirement complete only when the selected record is
+                linked to this finding; selecting an unrelated record does not
+                satisfy the requirement.
+              </p>
+              <ResourceState resource={evidenceRegister} />
+              {requirements.map(requirement => (
+                <div
+                  className="card-evidence-requirement"
+                  key={requirement}
+                >
+                  <strong>{requirement.replaceAll("-", " ")}</strong>
+                  {existingEvidence.length ? (
+                    <div className="card-evidence-options">
+                      {existingEvidence.map(record => {
+                        const evidenceId = id(record);
+                        const selected = (
+                          evidenceBindings[requirement] ?? []
+                        ).includes(evidenceId);
+                        return (
+                          <label key={evidenceId}>
+                            <input
+                              type="checkbox"
+                              checked={selected}
+                              onChange={event =>
+                                setEvidenceBindings(previous => {
+                                  const current = previous[requirement] ?? [];
+                                  return {
+                                    ...previous,
+                                    [requirement]: event.target.checked
+                                      ? [...current, evidenceId]
+                                      : current.filter(
+                                          value => value !== evidenceId
+                                        ),
+                                  };
+                                })
+                              }
+                            />
+                            <span>
+                              {text(record.title, evidenceId)}
+                              <small>
+                                {evidenceId} ·{" "}
+                                {text(record.linkedTo, "No finding link")} ·{" "}
+                                {text(record.state, "state not recorded")}
+                              </small>
+                            </span>
+                          </label>
+                        );
+                      })}
+                    </div>
+                  ) : (
+                    <small>
+                      No persisted evidence records are available for this audit.
+                    </small>
+                  )}
+                </div>
+              ))}
+            </details>
+          )}
+          <div className="assurance-inline">
+            <button
+              className="primary-button"
+              disabled={
+                action.busy || !canWrite || missing.length > 0 || !skillVersion
+              }
+              onClick={() =>
+                action.run(async () => {
+                  const response = await request("/api/agentkit/run", {
+                    auditId,
+                    findingId: item.findingId ?? undefined,
+                    cardId: item.id,
+                    skillId,
+                    skillVersion,
+                    answers,
+                    evidenceBindings,
+                  });
+                  setResult(response);
+                  refresh();
+                  return response;
+                })
+              }
+            >
+              <Play size={13} />
+              {action.busy ? "Running skill check…" : "Run skill check"}
+            </button>
+            <span className="card-skill-completion">
+              {questions.length
+                ? `${questions.length - missing.length}/${questions.length} required questions answered`
+                : "No required questions"}
+            </span>
+          </div>
+          {!canWrite && (
+            <small className="card-skill-readonly">
+              Sign in with a make-changes grant to answer and run the skill. The
+              questions remain inspectable.
+            </small>
+          )}
+          <ErrorNotice error={action.error} />
+          {result && (
+            <div className="card-skill-result">
+              <strong>
+                Skill trace recorded · {skillStateLabel(result.status)}
+              </strong>
+              <p>
+                {text(result.recommendation, "No recommendation was returned.")}
+              </p>
+              <small>
+                Trace {text(result.traceId)} · completion{" "}
+                {text(result.completion, "0")}% · human gate{" "}
+                {text(result.humanGate?.status, "pending")}
+              </small>
+              {Array.isArray(result.unknowns) && result.unknowns.length > 0 && (
+                <ul>
+                  {result.unknowns.map((unknown: unknown, index: number) => (
+                    <li key={index}>{text(unknown)}</li>
+                  ))}
+                </ul>
+              )}
+              {Array.isArray(result.advisories) &&
+                result.advisories.length > 0 && (
+                  <div className="card-skill-advisory">
+                    <strong>Open governance condition</strong>
+                    <ul>
+                      {result.advisories.map((advisory: unknown, index: number) => (
+                        <li key={index}>{text(advisory)}</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+              <details className="technical-details">
+                <summary>Technical trace</summary>
+                <Json value={result} />
+              </details>
+            </div>
+          )}
+        </>
+      )}
+    </div>
   );
 }
 export function AssetActions({
@@ -330,12 +754,17 @@ export function CardDossier({
         <div className="field-kanban-drawer-status">
           <Badge>{text(item.status)}</Badge>
           <span>Priority {text(item.priority)}</span>
-          <span>Updated {text(item.updatedAt)}</span>
+          <span>
+            Updated {formatWhen(item.updatedAt, "time not recorded")}
+          </span>
         </div>
         <p className="field-kanban-drawer-description">
           {text(item.description, "No description recorded.")}
         </p>
-        <Json value={item} title="Card identity, source IDs and revision" />
+        <details className="technical-details">
+          <summary>Technical card record (IDs and revision)</summary>
+          <Json value={item} />
+        </details>
         <div className="assurance-form">
           <label>
             Target stage
@@ -381,7 +810,15 @@ export function CardDossier({
             reached only through the qualified report-approval path, never by a
             card move. Moving to In progress is not a legal-clock trigger.
           </small>
+          <ErrorNotice error={action.error} />
         </div>
+        <CardSkillCheck
+          auditId={auditId}
+          item={item}
+          canWrite={canWrite}
+          refresh={refresh}
+          skillMeta={skillMeta}
+        />
         <div className="field-kanban-trace-block">
           <span className="tiny-label">APPLIED SKILLS & EXECUTION</span>
           {Array.isArray(item.skillIds) && item.skillIds.length ? (
@@ -420,7 +857,7 @@ export function CardDossier({
                   <strong>{text(file.filename ?? file.title)}</strong>
                   <small>
                     {text(file.mediaType)} · {text(file.sizeBytes)} bytes ·{" "}
-                    {text(file.createdAt)}
+                    {formatWhen(file.createdAt, "time not recorded")}
                   </small>
                   <small>
                     SHA-256 {text(file.sha256)} · asset {text(assetId(file))}
@@ -499,7 +936,12 @@ export function CardDossier({
                 >
                   <div>
                     <strong>{text(event.actor ?? event.role)}</strong>
-                    <small>{text(event.createdAt ?? event.timestamp)}</small>
+                    <small>
+                      {formatWhen(
+                        event.createdAt ?? event.timestamp,
+                        "time not recorded"
+                      )}
+                    </small>
                   </div>
                   <p>{text(event.text ?? event.message, "No message text")}</p>
                   <small className="field-kanban-message-skill">
@@ -640,6 +1082,22 @@ export function Board({
       (Number.parseInt(String(a.title), 10) || 0) -
       (Number.parseInt(String(b.title), 10) || 0)
   );
+  const baselineSignals = orderedBaseline.map(card => ({
+    card,
+    signal: baselineSignal(card),
+  }));
+  const baselineGreen = baselineSignals.filter(
+    entry => entry.signal.tone === "green"
+  ).length;
+  const baselineAmber = baselineSignals.filter(
+    entry => entry.signal.tone === "amber"
+  ).length;
+  const baselineRed = baselineSignals.filter(
+    entry => entry.signal.tone === "red"
+  ).length;
+  const baselineGray = baselineSignals.filter(
+    entry => entry.signal.tone === "gray"
+  ).length;
   const selected = items.find(i => id(i) === selectedId);
   const unknownStages = [
     ...new Set(items.map(i => text(i.status, "unassigned"))),
@@ -678,12 +1136,12 @@ export function Board({
             </span>
             <strong>
               {baselineCards.length
-                ? `${baselineCards.length} baseline work cards are loaded.`
+                ? `${baselineGreen} of ${orderedBaseline.length} phases complete · ${baselineAmber} in progress · ${baselineGray} not started${baselineRed ? ` · ${baselineRed} blocked` : ""}.`
                 : "This audit has no work plan yet."}
             </strong>
             <p>
               {baselineCards.length
-                ? "Each card is linked to its governed nuclear skill and the evidence it expects. Open a card, then use Open governed skill library to work the questions."
+                ? "Each phase is a governed nuclear skill. Green means its questions and evidence are complete; the human gate still applies. Amber means the skill is active or needs more context. Red means blocked or failed. Select a phase to open its card."
                 : "Load the minimum backlog for this audit. Cards are generated from the audit profile, the controlled five-phase method and the active nuclear skill contracts — not from a static checklist."}
             </p>
           </div>
@@ -722,10 +1180,11 @@ export function Board({
       )}
       {orderedBaseline.length > 0 && (
         <div className="audit-baseline-path">
-          {orderedBaseline.map((card, index) => (
+          {baselineSignals.map(({ card, signal }, index) => (
             <button
-              className="audit-baseline-step"
+              className={`audit-baseline-step ${signal.tone}`}
               key={id(card)}
+              title={signal.detail}
               onClick={() => {
                 setSelectedId(id(card));
                 storageSet(`assurance-card:${auditId}`, id(card));
@@ -738,7 +1197,13 @@ export function Board({
                 {skillNames.get(String(card.activeSkillId)) ??
                   String(card.activeSkillId ?? "No skill bound")}
               </small>
-              <em>{text(card.status)}</em>
+              <em className={`baseline-step-signal ${signal.tone}`}>
+                {signal.label}
+                {signal.percent > 0 ? ` · ${signal.percent}%` : ""}
+              </em>
+              <div className="baseline-step-meter" aria-hidden="true">
+                <i style={{ width: `${signal.percent}%` }} />
+              </div>
             </button>
           ))}
         </div>
@@ -837,6 +1302,12 @@ export function Board({
                     <strong>{stage.label}</strong>
                     <span>{cards.length}</span>
                   </div>
+                  {stage.id === "final" && cards.length === 0 && (
+                    <div className="field-kanban-empty">
+                      Reserved for the qualified report-approval path. Cards
+                      cannot be moved here directly.
+                    </div>
+                  )}
                   {cards.map(item => (
                     <motion.button
                       initial={{ opacity: 0, y: 5 }}

@@ -3,6 +3,7 @@ import { Download, Network } from "lucide-react";
 import {
   Badge,
   Empty,
+  HumanDetail,
   Inspector,
   Json,
   Panel,
@@ -24,9 +25,11 @@ import {
 export function Graph({
   auditId,
   findingId,
+  onNavigate,
 }: {
   auditId: string;
   findingId: string;
+  onNavigate?: (view: string) => void;
 }) {
   const [asOfInput, setAsOfInput] = useState("");
   const [effectiveInput, setEffectiveInput] = useState("");
@@ -40,6 +43,11 @@ export function Graph({
   const nodes = rows(resource.data, "nodes", "entities");
   const edges = rows(resource.data, "edges", "relationships");
   const events = rows(resource.data, "temporalEvents", "events");
+  const pending = payload(resource.data).pendingPromotion as Row | undefined;
+  const quantity = (value: unknown, singular: string, plural = `${singular}s`) => {
+    const count = Number(value ?? 0);
+    return `${count} ${count === 1 ? singular : plural}`;
+  };
   // Position only real nodes. Layout coordinates are presentation, not database facts.
   const columns = Math.max(1, Math.ceil(Math.sqrt(nodes.length)));
   const height = Math.max(320, Math.ceil(nodes.length / columns) * 125 + 80);
@@ -267,8 +275,47 @@ export function Graph({
               </div>
             ) : (
               <Empty>
-                No graph nodes returned for this audit/finding and time window.
-                No substitute projection is loaded.
+                <div className="graph-empty">
+                  <strong>
+                    No approved graph projection exists for {auditId}
+                    {findingId ? ` / ${findingId}` : ""} yet.
+                  </strong>
+                  <p>
+                    The genealogy graph is populated from persisted audit
+                    records only after a qualified report approval promotes
+                    them. This audit has no promoted projection for the
+                    selected time window, so no nodes, relationships, or
+                    temporal events are loaded. The system does not fabricate
+                    a graph from narrative records.
+                  </p>
+                  <p>
+                    To populate it, open <b>Audit reports</b>, route the final
+                    report to a qualified approver, and complete approval. That
+                    approval writes the immutable snapshot and promotes the
+                    audit&apos;s findings, evidence, products, suppliers,
+                    changes, and controls into the graph.
+                  </p>
+                  {pending && (
+                    <p>
+                      <b>Persisted and waiting for promotion:</b>{" "}
+                      {quantity(pending.findings, "finding")},{" "}
+                      {quantity(pending.evidence, "evidence record")},{" "}
+                      {quantity(pending.controls, "control")},{" "}
+                      {quantity(pending.suppliers, "supplier")} and{" "}
+                      {quantity(pending.changes, "change")}. They remain
+                      audit records, not graph nodes, until the approval gate is
+                      completed.
+                    </p>
+                  )}
+                  {onNavigate && (
+                    <button
+                      className="ghost-button"
+                      onClick={() => onNavigate("reports")}
+                    >
+                      Open Audit reports
+                    </button>
+                  )}
+                </div>
               </Empty>
             )}
             <Json
@@ -326,7 +373,7 @@ export function Graph({
           description={`Audit ${auditId} · exact persisted graph response`}
           onClose={() => setSelected(null)}
         >
-          <Json value={selected.row} open />
+          <HumanDetail value={selected.row} />
           {selected.kind === "node" && (
             <>
               <h3>Direct returned relationships</h3>
