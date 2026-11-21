@@ -34,10 +34,12 @@ export function Skills({
   auditId,
   findingId,
   canWrite,
+  initialSkillId,
 }: {
   auditId: string;
   findingId: string;
   canWrite: boolean;
+  initialSkillId?: string;
 }) {
   const library = useResource("/api/nuclear/skills");
   const configuredPhases = useConfigurations("skill");
@@ -46,10 +48,14 @@ export function Skills({
   const [answers, setAnswers] = useState<Record<string, any>>({});
   const [phase, setPhase] = useState("");
   const action = useAction();
-  const skills = rows(library.data, "skills").filter(envelope => {
+  const libraryRows = rows(library.data, "skills");
+  const skills = libraryRows.filter(envelope => {
     const value = payload(envelope);
     return Array.isArray(value.questions) || value.route || value.skillContract;
   });
+  const phaseGuide = libraryRows.find(
+    envelope => id(envelope) === "audit-phases"
+  );
   const selectedEnvelope = skills.find(
     envelope =>
       `${id(envelope)}@${envelope.version ?? payload(envelope).version ?? ""}` ===
@@ -65,11 +71,24 @@ export function Skills({
   const missing = questions.filter(
     question => question.required && !hasAnswer(answers[String(question.id)])
   );
-  const storedPhases: Row[] = configuredPhases.data.flatMap(envelope => {
-    if (Array.isArray(envelope.payload)) return envelope.payload;
-    const p = payload(envelope);
-    return rows(p.phases, "phases");
-  });
+  const guidePayload = phaseGuide ? payload(phaseGuide) : null;
+  const controlledPhases: Row[] =
+    guidePayload && typeof guidePayload === "object" && !Array.isArray(guidePayload)
+      ? Object.entries(guidePayload)
+          .filter(
+            ([key, value]) =>
+              /^\d+$/.test(key) && value && typeof value === "object"
+          )
+          .sort(([a], [b]) => Number(a) - Number(b))
+          .map(([, value]) => value as Row)
+      : [];
+  const storedPhases: Row[] = controlledPhases.length
+    ? controlledPhases
+    : configuredPhases.data.flatMap(envelope => {
+        if (Array.isArray(envelope.payload)) return envelope.payload;
+        const p = payload(envelope);
+        return rows(p.phases, "phases");
+      });
   const phases: Row[] = storedPhases.length
     ? storedPhases
     : [
@@ -86,6 +105,14 @@ export function Skills({
       `${id(envelope)}@${envelope.version ?? payload(envelope).version ?? ""}`
     );
   };
+  useEffect(() => {
+    if (!initialSkillId) return;
+    const match = skills.find(envelope => id(envelope) === initialSkillId);
+    if (match) select(match);
+    // The library is loaded asynchronously; selecting is intentionally one-way
+    // and does not override a later manual choice by the auditor.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialSkillId, library.data]);
   return (
     <div className="view-stack">
       <Panel

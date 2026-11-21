@@ -254,6 +254,7 @@ export function CardDossier({
   item,
   attachments,
   communications,
+  skillMeta,
   refresh,
   close,
   onSkill,
@@ -263,6 +264,7 @@ export function CardDossier({
   item: Row;
   attachments: Row[];
   communications: Row[];
+  skillMeta: Map<string, { name: string; version: string }>;
   refresh: () => void;
   close: () => void;
   onSkill: () => void;
@@ -384,14 +386,25 @@ export function CardDossier({
           <span className="tiny-label">APPLIED SKILLS & EXECUTION</span>
           {Array.isArray(item.skillIds) && item.skillIds.length ? (
             item.skillIds.map((skillId: string) => (
-              <Badge key={skillId}>{skillId}</Badge>
+              <Badge key={skillId}>
+                {skillMeta.get(skillId)?.name ?? skillId}
+              </Badge>
             ))
           ) : (
             <small>No applied skill recorded for this card.</small>
           )}
           <small>
-            Skill version {text(item.skillVersion, "Not returned")} · trace{" "}
-            {text(item.traceId, "Not returned")}
+            Governed version{" "}
+            {text(
+              item.skillVersion ??
+                skillMeta.get(String(item.activeSkillId))?.version,
+              "recorded in the skill library"
+            )}{" "}
+            · execution trace{" "}
+            {text(
+              item.traceId,
+              "none yet — run the skill to create one"
+            )}
           </small>
           <button className="ghost-button" onClick={onSkill}>
             Open governed skill library
@@ -585,9 +598,10 @@ export function Board({
   auditId: string;
   findingId: string;
   canWrite: boolean;
-  onSkill: (findingId: string) => void;
+  onSkill: (findingId: string, skillId?: string) => void;
 }) {
   const resource = useResource(scoped("/api/kanban", auditId));
+  const library = useResource("/api/nuclear/skills");
   const [selectedId, setSelectedId] = useState(() =>
     storageGet(`assurance-card:${auditId}`)
   );
@@ -600,6 +614,32 @@ export function Board({
   });
   const action = useAction();
   const items = rows(resource.data, "items", "cards").map(payload);
+  const skillNames = new Map(
+    rows(library.data, "skills").map(envelope => [
+      id(envelope),
+      label(payload(envelope)),
+    ])
+  );
+  const skillMeta = new Map(
+    rows(library.data, "skills").map(envelope => {
+      const skill = payload(envelope);
+      return [
+        id(envelope),
+        {
+          name: label(skill),
+          version: text(envelope.version ?? skill.version, ""),
+        },
+      ];
+    })
+  );
+  const baselineCards = items.filter(item =>
+    String(item.sourceRecordId ?? "").startsWith("AUDIT-BASELINE:")
+  );
+  const orderedBaseline = [...baselineCards].sort(
+    (a, b) =>
+      (Number.parseInt(String(a.title), 10) || 0) -
+      (Number.parseInt(String(b.title), 10) || 0)
+  );
   const selected = items.find(i => id(i) === selectedId);
   const unknownStages = [
     ...new Set(items.map(i => text(i.status, "unassigned"))),
@@ -630,6 +670,79 @@ export function Board({
       }
     >
       <ResourceState resource={resource} />
+      {!resource.loading && !resource.error && (
+        <div className="audit-baseline-banner">
+          <div>
+            <span className="tiny-label">
+              START HERE · FIVE-PHASE AUDIT PATH
+            </span>
+            <strong>
+              {baselineCards.length
+                ? `${baselineCards.length} baseline work cards are loaded.`
+                : "This audit has no work plan yet."}
+            </strong>
+            <p>
+              {baselineCards.length
+                ? "Each card is linked to its governed nuclear skill and the evidence it expects. Open a card, then use Open governed skill library to work the questions."
+                : "Load the minimum backlog for this audit. Cards are generated from the audit profile, the controlled five-phase method and the active nuclear skill contracts — not from a static checklist."}
+            </p>
+          </div>
+          {!baselineCards.length && (
+            <button
+              className="primary-button"
+              disabled={!canWrite || action.busy}
+              onClick={() =>
+                action.run(async () => {
+                  const result = await request("/api/kanban/baseline", {
+                    auditId,
+                  });
+                  resource.refresh();
+                  return result;
+                })
+              }
+            >
+              <Plus size={13} />
+              {action.busy ? "Loading…" : "Load baseline checklist"}
+            </button>
+          )}
+          {orderedBaseline.length > 0 && (
+            <button
+              className="primary-button"
+              onClick={() => {
+                const first = orderedBaseline[0];
+                setSelectedId(id(first));
+                storageSet(`assurance-card:${auditId}`, id(first));
+                setOpen(true);
+              }}
+            >
+              Start with {label(orderedBaseline[0])}
+            </button>
+          )}
+        </div>
+      )}
+      {orderedBaseline.length > 0 && (
+        <div className="audit-baseline-path">
+          {orderedBaseline.map((card, index) => (
+            <button
+              className="audit-baseline-step"
+              key={id(card)}
+              onClick={() => {
+                setSelectedId(id(card));
+                storageSet(`assurance-card:${auditId}`, id(card));
+                setOpen(true);
+              }}
+            >
+              <span>{index + 1}</span>
+              <strong>{label(card)}</strong>
+              <small>
+                {skillNames.get(String(card.activeSkillId)) ??
+                  String(card.activeSkillId ?? "No skill bound")}
+              </small>
+              <em>{text(card.status)}</em>
+            </button>
+          ))}
+        </div>
+      )}
       {create && (
         <div className="assurance-form">
           <label>
@@ -695,15 +808,29 @@ export function Board({
         <>
           {!items.length && (
             <Empty>
-              No persisted Kanban cards for this audit. Create an intake card;
-              nothing is inferred from another audit.
+              No persisted Kanban cards for this audit. Load the baseline
+              checklist above, or create a real intake card.
             </Empty>
           )}
           <div className="field-kanban-board">
             {columns.map(stage => {
-              const cards = items.filter(
-                item => text(item.status, "unassigned") === stage.id
-              );
+              const cards = items
+                .filter(item => text(item.status, "unassigned") === stage.id)
+                .sort((a, b) => {
+                  const aBaseline = String(a.sourceRecordId ?? "").startsWith(
+                    "AUDIT-BASELINE:"
+                  );
+                  const bBaseline = String(b.sourceRecordId ?? "").startsWith(
+                    "AUDIT-BASELINE:"
+                  );
+                  if (aBaseline && bBaseline)
+                    return (
+                      (Number.parseInt(String(a.title), 10) || 0) -
+                      (Number.parseInt(String(b.title), 10) || 0)
+                    );
+                  if (aBaseline !== bBaseline) return aBaseline ? -1 : 1;
+                  return 0;
+                });
               return (
                 <div className="field-kanban-column" key={stage.id}>
                   <div className="field-kanban-column-head">
@@ -729,6 +856,13 @@ export function Board({
                         )}
                       </div>
                       <strong>{label(item)}</strong>
+                      {item.activeSkillId && (
+                        <span className="field-kanban-skill">
+                          <Workflow size={10} />{" "}
+                          {skillNames.get(String(item.activeSkillId)) ??
+                            String(item.activeSkillId)}
+                        </span>
+                      )}
                       <p>{text(item.description, "No description recorded")}</p>
                       <small>
                         Finding {text(item.findingId, "Not linked")} ·{" "}
@@ -761,12 +895,22 @@ export function Board({
           item={selected}
           attachments={rows(resource.data, "attachments")}
           communications={rows(resource.data, "communications")}
+          skillMeta={skillMeta}
           refresh={resource.refresh}
           close={() => setOpen(false)}
           canWrite={canWrite}
           onSkill={() => {
             setOpen(false);
-            onSkill(String(selected.findingId ?? ""));
+            onSkill(
+              String(selected.findingId ?? ""),
+              String(
+                selected.activeSkillId ??
+                  (Array.isArray(selected.skillIds)
+                    ? selected.skillIds[0]
+                    : "") ??
+                  ""
+              )
+            );
           }}
         />
       )}

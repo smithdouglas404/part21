@@ -175,6 +175,104 @@ const NAV_AREA: Record<string, string> = {
   admin: "admin",
 };
 
+function AuditStartPath({
+  auditId,
+  navigate,
+  onAsk,
+}: {
+  auditId: string;
+  navigate: (view: string) => void;
+  onAsk: () => void;
+}) {
+  const library = useResource("/api/nuclear/skills");
+  const guide = rows(library.data, "skills").find(
+    envelope => id(envelope) === "audit-phases"
+  );
+  const guidePayload = guide ? payload(guide) : null;
+  const phases = guidePayload
+    ? Object.entries(guidePayload)
+        .filter(
+          ([key, value]) =>
+            /^\d+$/.test(key) && value && typeof value === "object"
+        )
+        .sort(([a], [b]) => Number(a) - Number(b))
+        .map(([, value]) => value as Row)
+    : [];
+  const cards = useResource(scoped("/api/kanban", auditId));
+  const baselineCards = rows(cards.data, "items", "cards")
+    .map(payload)
+    .filter(card =>
+      String(card.sourceRecordId ?? "").startsWith("AUDIT-BASELINE:")
+    )
+    .sort(
+      (a, b) =>
+        (Number.parseInt(String(a.title), 10) || 0) -
+        (Number.parseInt(String(b.title), 10) || 0)
+    );
+  const skillNames = new Map(
+    rows(library.data, "skills").map(envelope => [
+      id(envelope),
+      label(payload(envelope)),
+    ])
+  );
+  const openPhase = (phase: Row, index: number) => {
+    const card =
+      baselineCards[index] ??
+      baselineCards.find(item => text(item.baselinePhase) === id(phase));
+    if (card) storageSet(`assurance-card:${auditId}`, id(card));
+    navigate("audit");
+  };
+  return (
+    <section className="audit-start-panel">
+      <div className="audit-start-copy">
+        <span className="tiny-label">NEW TO THIS AUDIT? START HERE</span>
+        <h2>Five phases. A governed skill at every step.</h2>
+        <p>
+          Frame the audit, pull evidence, trace the chain, evaluate findings,
+          then review and close. Open a phase below to work its baseline card in
+          the audit workbench; the card carries the skill, the questions and the
+          evidence it expects.
+        </p>
+      </div>
+      <div className="audit-phase-path">
+        {phases.map((phase, index) => (
+          <button
+            className="audit-phase-step"
+            key={id(phase) || index}
+            onClick={() => openPhase(phase, index)}
+          >
+            <span>{index + 1}</span>
+            <strong>{label(phase)}</strong>
+            <small>{text(phase.description, "Controlled phase")}</small>
+            <em>
+              {skillNames.get(text(baselineCards[index]?.activeSkillId)) ||
+                "Governed skill attached"}
+            </em>
+          </button>
+        ))}
+        {!phases.length && (
+          <small>
+            {library.loading
+              ? "Loading the controlled phase guide…"
+              : "The controlled phase guide is unavailable. Open the audit skills library to inspect the configured skills."}
+          </small>
+        )}
+      </div>
+      <div className="assurance-inline">
+        <button className="primary-button" onClick={() => navigate("audit")}>
+          Open the audit workbench
+        </button>
+        <button className="ghost-button" onClick={() => navigate("skills")}>
+          Browse the skill library
+        </button>
+        <button className="ghost-button" onClick={onAsk}>
+          Ask the live agent
+        </button>
+      </div>
+    </section>
+  );
+}
+
 function Overview({
   auditId,
   audit,
@@ -182,6 +280,7 @@ function Overview({
   lens,
   navigate,
   onInspect,
+  onAsk,
 }: {
   auditId: string;
   audit: Row;
@@ -189,6 +288,7 @@ function Overview({
   lens: Row;
   navigate: (view: string) => void;
   onInspect: (title: string, data: unknown) => void;
+  onAsk: () => void;
 }) {
   const findings = rows(portfolio.findings);
   const evidence = rows(portfolio.evidence);
@@ -240,6 +340,7 @@ function Overview({
   ];
   return (
     <div className="view-stack">
+      <AuditStartPath auditId={auditId} navigate={navigate} onAsk={onAsk} />
       <div className="persona-focus-strip">
         <div>
           <span className="tiny-label">PERSONA LENS · NOT AUTHORIZATION</span>
@@ -370,15 +471,15 @@ export function Workspace({
     const saved = storageGet(`assurance-view:${auditId}`);
     return navigation.some(n => n.id === saved && canSee(n))
       ? saved
-      : navigation.some(n => n.id === lens.defaultView && canSee(n))
-        ? String(lens.defaultView)
-        : "overview";
+      : "overview";
   });
+  const [skillFocus, setSkillFocus] = useState("");
   const navigate = (next: string) => {
     if (
       navigation.some(n => n.id === next && canSee(n))
     ) {
       setView(next);
+      if (next !== "skills") setSkillFocus("");
       storageSet(`assurance-view:${auditId}`, next);
     }
   };
@@ -444,6 +545,7 @@ export function Workspace({
         lens={lens}
         navigate={navigate}
         onInspect={openInspect}
+        onAsk={() => setDrawer("chat")}
       />
     );
   else if (view === "audit")
@@ -453,8 +555,9 @@ export function Workspace({
           auditId={auditId}
           findingId={actualFindingId}
           canWrite={canWrite}
-          onSkill={linked => {
+          onSkill={(linked, skillId) => {
             if (linked) setFinding(linked);
+            setSkillFocus(skillId ?? "");
             navigate("skills");
           }}
         />
@@ -474,6 +577,7 @@ export function Workspace({
         auditId={auditId}
         findingId={actualFindingId}
         canWrite={canWrite}
+        initialSkillId={skillFocus}
       />
     );
   else if (view === "evidence")
@@ -614,7 +718,10 @@ export function Workspace({
                     title={n.label}
                     className={`nav-item ${view === n.id ? "active" : ""}`}
                     key={n.id}
-                    onClick={() => navigate(n.id)}
+                    onClick={() => {
+                      setSkillFocus("");
+                      navigate(n.id);
+                    }}
                   >
                     <n.icon size={15} />
                     <span>{n.label}</span>
@@ -670,6 +777,22 @@ export function Workspace({
           </div>
         </header>
         <main className="main-content">
+          {principal.id === "read-only-visitor" && (
+            <div className="read-only-banner">
+              <ShieldCheck size={16} />
+              <div>
+                <strong>Read-only demonstration view</strong>
+                <span>
+                  You can inspect every record. Adding cards, evidence, stage
+                  moves and approvals requires a signed-in identity with a
+                  make-changes grant for this audit.
+                </span>
+              </div>
+              <button className="ghost-button" onClick={onLogout}>
+                Sign in
+              </button>
+            </div>
+          )}
           <div className="assurance-context-bar">
             <label>
               Persona lens

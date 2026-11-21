@@ -1,11 +1,5 @@
 import { useState } from "react";
-import {
-  ArrowUpRight,
-  ClipboardCheck,
-  Plus,
-  ShieldCheck,
-  UserCog,
-} from "lucide-react";
+import { ArrowUpRight, Plus, ShieldCheck, UserCog } from "lucide-react";
 import { Badge, Empty, ErrorNotice, ResourceState } from "./Common";
 import {
   id,
@@ -181,8 +175,12 @@ export function Launch({
   // The register is already scoped by the server, so the screen reflects grants immediately
   // instead of re-filtering against a session snapshot captured at sign-in.
   const auditRows = rows(audits.data, "audits");
-  const chosen = auditRows.find(a => id(a) === selectedAudit);
   const lens = personas.data.find(p => id(p) === selectedLens);
+  const openAudit = (auditId: string) => {
+    if (!lens) return;
+    onAudit(auditId);
+    onEnter();
+  };
   return (
     <div className="launch-shell">
       <div className="launch-topbar">
@@ -257,7 +255,10 @@ export function Launch({
               <div>
                 <span className="tiny-label">02 · AUDIT CONTEXT</span>
                 <h2>Resume or create an audit</h2>
-                <p>Only authorized database audits are selectable.</p>
+                <p>
+                  Select a card, then Open — or double-click to enter. Only
+                  authorized database audits are selectable.
+                </p>
               </div>
               <button
                 className="ghost-button"
@@ -280,10 +281,23 @@ export function Launch({
               {auditRows.map(envelope => {
                 const audit = payload(envelope);
                 return (
-                  <button
+                  <article
                     key={id(envelope)}
                     className={`launch-audit-card ${id(envelope) === selectedAudit ? "active" : ""}`}
                     onClick={() => onAudit(id(envelope))}
+                    onDoubleClick={() => openAudit(id(envelope))}
+                    onKeyDown={event => {
+                      if (event.target !== event.currentTarget) return;
+                      if (event.key === "Enter" || event.key === " ") {
+                        event.preventDefault();
+                        openAudit(id(envelope));
+                      }
+                    }}
+                    tabIndex={0}
+                    aria-current={
+                      id(envelope) === selectedAudit ? "true" : undefined
+                    }
+                    aria-label={`${id(envelope)} ${label(audit)}`}
                   >
                     <div className="launch-audit-top">
                       <span>{id(envelope)}</span>
@@ -297,8 +311,26 @@ export function Launch({
                     <div className="launch-audit-meta">
                       <span>Due {text(audit.due)}</span>
                       <span>Owner {text(audit.owner, "Not recorded")}</span>
+                      <button
+                        type="button"
+                        className="launch-audit-open"
+                        disabled={!lens}
+                        title={
+                          lens
+                            ? `Open ${id(envelope)}`
+                            : "Select an assurance lens first"
+                        }
+                        onClick={event => {
+                          event.stopPropagation();
+                          openAudit(id(envelope));
+                        }}
+                        onDoubleClick={event => event.stopPropagation()}
+                      >
+                        Open
+                        <ArrowUpRight size={12} />
+                      </button>
                     </div>
-                  </button>
+                  </article>
                 );
               })}
             </div>
@@ -312,30 +344,6 @@ export function Launch({
               Refresh audit register
             </button>
           </div>
-        </section>
-        <section className="launch-bottom">
-          <div className="launch-context-card">
-            <ClipboardCheck size={20} />
-            <div>
-              <span className="tiny-label">CONTEXT PREVIEW</span>
-              <strong>
-                {lens ? label(lens) : "No lens selected"} ·{" "}
-                {chosen ? id(chosen) : "No audit selected"}
-              </strong>
-              <p>
-                Permissions remain those of {principal.actor}. Readiness and
-                operational records are loaded after entry.
-              </p>
-            </div>
-          </div>
-          <button
-            className="launch-start-button"
-            disabled={!chosen || !lens}
-            onClick={onEnter}
-          >
-            Enter assurance workspace
-            <ArrowUpRight size={17} />
-          </button>
         </section>
         <div className="launch-footer">
           Human review required · engineering workspace, not a compliance

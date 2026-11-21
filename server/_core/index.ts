@@ -15,6 +15,7 @@ import { approveRoutedFinalReport, listReportApprovalTasks, routeFinalReportAppr
 import { listAssurancePeople } from "../people";
 import { listApprovalRules } from "../approval-rules";
 import { appendKanbanCommunication, attachKanbanAsset, createKanbanItem, listKanbanItems, moveKanbanItem } from "../kanban-store";
+import { ensureAuditBaseline } from "../audit-baseline";
 import { ontologyStorageStatus, syncOntologySnapshot } from "../ontology-store";
 import { getReportDraft, registerEvidence } from "../evidence";
 import { assessControlledRemediationImpact, getAuditProfiles, getControlledRegulatoryPack, traverseControlledRegulatoryTree } from "../regulatory-runtime";
@@ -243,7 +244,20 @@ async function startServer() {
             { expectedRevision: 0, actor: principal.id, createOnly: true },
             { id: `EVT-${crypto.randomUUID()}`, type: "audit.created", actor: principal.id, auditId, entityId: auditId, payload: { title, scope, standard, dueDate: due, auditProfileId: profile.id, auditProfileVersion: profile.version, source: "launch-screen" } },
           );
-          return res.status(201).json({ source: "mysql-database", audit: { ...payload, recordId: auditId, auditId, revision: written.record.revision } });
+          // A new audit must not open onto five empty Kanban columns. The baseline is a
+          // projection of the governed profile, active phase guide and active skill contracts.
+          // A baseline failure must not roll back the audit record; it is returned explicitly.
+          let baseline: unknown;
+          try {
+            baseline = await ensureAuditBaseline(auditId, {
+              ...principal,
+              auditIds: [...new Set([...(principal.auditIds ?? []), auditId])],
+              auditWriteIds: [...new Set([...(principal.auditWriteIds ?? []), auditId])],
+            });
+          } catch (error) {
+            baseline = { ok: false, auditId, error: error instanceof Error ? error.message : "Baseline generation failed." };
+          }
+          return res.status(201).json({ source: "mysql-database", audit: { ...payload, recordId: auditId, auditId, revision: written.record.revision }, baseline });
         } catch (error) {
           if (attempt === 5) throw error;
         }
@@ -414,6 +428,12 @@ async function startServer() {
     const auditId = String(req.query.auditId ?? "").trim();
     if (!auditId) return res.status(400).json({ ok: false, error: "auditId is required to list Kanban items" });
     return res.json(await listKanbanItems(auditId));
+  }));
+  app.post("/api/kanban/baseline", jsonRoute(async (req: any, res: any) => {
+    const auditId = String(req.body?.auditId ?? "").trim();
+    if (!auditId) return res.status(400).json({ ok: false, error: "auditId is required to generate the audit baseline." });
+    await requireArea("kanban", "write");
+    return res.json(await ensureAuditBaseline(auditId, currentPrincipal()));
   }));
   app.post("/api/kanban/items", jsonRoute(async (req: any, res: any) => { await requireArea("kanban", "write"); return res.json(await createKanbanItem(req.body ?? {}, currentPrincipal() as any)); }));
   app.post("/api/kanban/items/:itemId/move", jsonRoute(async (req: any, res: any) => { await requireArea("kanban", "write"); return res.json(await moveKanbanItem(req.params.itemId, req.body?.status, String(req.body?.actor ?? currentPrincipal().actor), String(req.body?.auditId ?? req.query.auditId ?? ""), req.body?.expectedRevision === undefined ? undefined : Number(req.body.expectedRevision), req.body?.reason ? String(req.body.reason) : undefined, currentPrincipal() as any)); }));
