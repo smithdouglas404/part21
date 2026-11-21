@@ -28,7 +28,7 @@ const audits = [
 ];
 
 async function main() {
-  const token = await sdk.signSession({ openId, appId: ENV.appId, name: "Pookie" }, { expiresInMs: 15 * 60 * 1000 });
+  const token = await sdk.signSession({ openId, appId: ENV.appId, name: "Frank" }, { expiresInMs: 15 * 60 * 1000 });
   const cookie = `${COOKIE_NAME}=${token}`;
   const profilesResponse = await fetch(`${base}/api/nuclear/profiles`, { headers: { cookie } });
   const profiles = await profilesResponse.json() as any;

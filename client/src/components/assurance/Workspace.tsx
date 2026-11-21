@@ -18,6 +18,7 @@ import {
 import { motion } from "framer-motion";
 import { Card } from "@/components/ui/card";
 import { Admin, AdapterOperations, Identity } from "./Admin";
+import { RbacAdmin } from "./Rbac";
 import { Board } from "./Board";
 import { Clocks } from "./Clocks";
 import {
@@ -142,12 +143,38 @@ const navigation = [
     group: "Agent operations",
   },
   {
+    id: "rbac",
+    label: "Role access (RBAC)",
+    icon: ShieldCheck,
+    group: "Administration",
+  },
+  {
     id: "admin",
     label: "Administration",
     icon: Settings,
     group: "Administration",
   },
 ];
+const NAV_AREA: Record<string, string> = {
+  overview: "command_center",
+  audit: "audit",
+  skills: "skills",
+  governance: "governance",
+  clocks: "clocks",
+  graph: "graph",
+  controls: "controls",
+  evidence: "evidence",
+  documents: "documents",
+  reports: "reports",
+  policy: "policy",
+  regulatory: "regulatory",
+  agents: "agents",
+  roles: "governance",
+  data: "data",
+  rbac: "admin",
+  admin: "admin",
+};
+
 function Overview({
   auditId,
   audit,
@@ -332,21 +359,24 @@ export function Workspace({
   refreshSession: () => void;
 }) {
   const lens = payload(personas.find(p => id(p) === lensId));
+  const canSee = (item: { id: string }) => {
+    if (item.id === "admin" || item.id === "rbac") return principal.isAdmin;
+    const permissions = principal.permissions;
+    if (!permissions?.length || permissions.includes("*")) return true;
+    const area = NAV_AREA[item.id];
+    return !area || permissions.includes(`${area}.read`);
+  };
   const [view, setView] = useState(() => {
     const saved = storageGet(`assurance-view:${auditId}`);
-    return navigation.some(
-      n => n.id === saved && (n.id !== "admin" || principal.isAdmin)
-    )
+    return navigation.some(n => n.id === saved && canSee(n))
       ? saved
-      : navigation.some(n => n.id === lens.defaultView && n.id !== "admin")
+      : navigation.some(n => n.id === lens.defaultView && canSee(n))
         ? String(lens.defaultView)
         : "overview";
   });
   const navigate = (next: string) => {
     if (
-      navigation.some(
-        n => n.id === next && (n.id !== "admin" || principal.isAdmin)
-      )
+      navigation.some(n => n.id === next && canSee(n))
     ) {
       setView(next);
       storageSet(`assurance-view:${auditId}`, next);
@@ -548,6 +578,8 @@ export function Workspace({
         <AdapterOperations auditId={auditId} isAdmin={principal.isAdmin} />
       </div>
     );
+  else if (view === "rbac")
+    page = <RbacAdmin principal={principal} auditId={auditId} />;
   else page = <Admin principal={principal} auditId={auditId} />;
   return (
     <div className="app-shell assurance-shell">
@@ -569,17 +601,14 @@ export function Workspace({
           {[
             ...new Set(
               navigation
-                .filter(n => n.id !== "admin" || principal.isAdmin)
+                .filter(canSee)
                 .map(n => n.group)
             ),
           ].map(group => (
             <div key={group}>
               <div className="nav-heading">{group}</div>
               {navigation
-                .filter(
-                  n =>
-                    n.group === group && (n.id !== "admin" || principal.isAdmin)
-                )
+                .filter(n => n.group === group && canSee(n))
                 .map(n => (
                   <button
                     title={n.label}

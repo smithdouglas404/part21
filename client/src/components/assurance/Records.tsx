@@ -302,7 +302,7 @@ export function Reports({
   const action = useAction();
   const actualPeople = rows(people.data, "people")
     .map(payload)
-    .filter(p => p.synthetic !== true && p.active !== false);
+    .filter(p => p.active !== false);
   const rule = rows(rules.data, "rules")[0];
   const allowed = Array.isArray(rule?.allowedRoleIds)
     ? rule.allowedRoleIds
@@ -403,16 +403,16 @@ export function Reports({
             </select>
           </label>
           <label>
-            Actual database approver
+            Named approver from the database directory
             <select
               value={personId}
               onChange={e => setPersonId(e.target.value)}
             >
-              <option value="">Select a real person</option>
+              <option value="">Select a named approver</option>
               {approvers.map(p => (
                 <option key={id(p)} value={id(p)}>
-                  {label(p)} ·{" "}
-                  {text(p.principalId, "Principal binding not returned")}
+                  {label(p)} · {text(p.title, "Role title not recorded")}
+                  {p.synthetic ? " · demonstration directory" : ""}
                 </option>
               ))}
             </select>
@@ -450,9 +450,9 @@ export function Reports({
         </div>
         {!actualPeople.length && !people.loading && !people.error && (
           <Empty>
-            No actual approver directory entries are available. Synthetic people
-            cannot approve; an administrator must register the actual person and
-            current qualification.
+            No directory entry matches the allowed approver roles for this
+            decision. An administrator can register a named person and assign an
+            authorized role in Role access (RBAC).
           </Empty>
         )}
         {!allowed.length && !rules.loading && !rules.error && (

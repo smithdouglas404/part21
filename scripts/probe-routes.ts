@@ -33,7 +33,7 @@ const probes: Probe[] = [
 ];
 
 async function main() {
-  const token = await sdk.signSession({ openId, appId: ENV.appId, name: "Pookie" }, { expiresInMs: 15 * 60 * 1000 });
+  const token = await sdk.signSession({ openId, appId: ENV.appId, name: "Frank" }, { expiresInMs: 15 * 60 * 1000 });
   const cookie = `${COOKIE_NAME}=${token}`;
   let failures = 0;
   for (const probe of probes) {

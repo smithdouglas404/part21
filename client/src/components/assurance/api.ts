@@ -14,6 +14,7 @@ export type Principal = {
   qualifiedAuditIds?: string[];
   access?: "look_only" | "make_changes";
   qualificationEvidenceId?: string;
+  permissions?: string[];
 };
 export class ApiError extends Error {
   constructor(
@@ -89,16 +90,18 @@ export async function request<T = any>(
   if (!response.ok || result?.ok === false) {
     if (response.status === 401)
       window.dispatchEvent(new Event("assurance-session-expired"));
-    throw new ApiError(
-      String(
-        result?.error?.message ??
-          result?.error ??
-          result?.message ??
-          `Request failed (${response.status})`
-      ),
-      response.status,
-      result
+    const raw = String(
+      result?.error?.message ??
+        result?.error ??
+        result?.message ??
+        `Request failed (${response.status})`
     );
+    // Permission refusals are part of the product experience. State the limit plainly and
+    // tell the person what to do next instead of exposing an authorization stack message.
+    const message = response.status === 403 && !/^you do not have permission/i.test(raw)
+      ? `You do not have permission to do that at this time. ${raw}`
+      : raw;
+    throw new ApiError(message, response.status, result);
   }
   return result as T;
 }

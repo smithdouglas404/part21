@@ -175,7 +175,7 @@ add("reports", "readiness requires auditId", "GET", "/api/reports/audit-readines
 add("reports", "approvals require auditId", "GET", "/api/reports/approvals", [400]);
 add("reports", "finalize with empty body is rejected", "POST", "/api/reports/finalize", [400, 409], json({}));
 add("reports", "approval route requires auditId", "POST", "/api/reports/NOT-AN-AUDIT/approval-route", [400, 404, 409], json({}));
-add("reports", "approval of unknown task is refused", "POST", "/api/reports/approvals/APR-NOT-REAL/approve", [400, 404, 409], json({ decision: "approved", actor: "Pookie" }));
+add("reports", "approval of unknown task is refused", "POST", "/api/reports/approvals/APR-NOT-REAL/approve", [400, 404, 409], json({ decision: "approved", actor: "Frank" }));
 add("graph", "export requires auditId", "GET", "/api/graph/export", [400]);
 add("graph", "context requires auditId", "GET", "/api/graph/context", [400]);
 
@@ -208,7 +208,7 @@ type ExtraCase = Case & { extraHeaders?: Record<string, string> };
 
 async function main() {
   if (cases.length !== 150) throw new Error(`Expected exactly 150 negative cases, built ${cases.length}`);
-  const token = await sdk.signSession({ openId, appId: ENV.appId, name: "Pookie" }, { expiresInMs: 20 * 60 * 1000 });
+  const token = await sdk.signSession({ openId, appId: ENV.appId, name: "Frank" }, { expiresInMs: 20 * 60 * 1000 });
   const cookie = `${COOKIE_NAME}=${token}`;
   const results: { id: string; group: string; name: string; expected: number[]; status: number; pass: boolean; detail: string }[] = [];
   const fs = await import("node:fs");

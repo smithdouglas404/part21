@@ -90,7 +90,7 @@ async function main() {
     console.log(`${call.method.padEnd(6)} ${call.sample}  [${call.file}]`);
   }
 
-  const token = await sdk.signSession({ openId: process.env.PART21_TEST_OPEN_ID ?? "hJb4ZHUeEmhQEsRt87jMfS", appId: ENV.appId, name: "Pookie" }, { expiresInMs: 10 * 60 * 1000 });
+  const token = await sdk.signSession({ openId: process.env.PART21_TEST_OPEN_ID ?? "hJb4ZHUeEmhQEsRt87jMfS", appId: ENV.appId, name: "Frank" }, { expiresInMs: 10 * 60 * 1000 });
   const cookie = `${COOKIE_NAME}=${token}`;
   const getRoutes = routes.filter(route => route.method === "GET" && !route.pattern.includes("*"));
   console.log(`\n=== LIVE GET SWEEP (${getRoutes.length} routes) ===`);

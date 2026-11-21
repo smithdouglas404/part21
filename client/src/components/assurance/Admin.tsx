@@ -59,7 +59,7 @@ function AccessSetup({ principal }: { principal: Principal }) {
   const action = useAction();
   const directory = rows(people.data, "people")
     .map(payload)
-    .filter(p => p.synthetic !== true && p.active !== false);
+    .filter(p => p.active !== false);
   return (
     <Panel
       title="Actual directory & audit scope setup"
@@ -136,7 +136,8 @@ function AccessSetup({ principal }: { principal: Principal }) {
             <option value="">No qualification person</option>
             {directory.map(p => (
               <option key={id(p)} value={id(p)}>
-                {label(p)} · {text(p.principalId, "Binding not returned")}
+                {label(p)} · {text(p.title, "Role title not recorded")}
+                {p.synthetic ? " · demonstration" : ""}
               </option>
             ))}
           </select>

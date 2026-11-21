@@ -40,16 +40,20 @@ export function registerOAuthRoutes(app: Express) {
         return;
       }
 
+      // The application directory owns the display name after the first registration. A
+      // subsequent OAuth sign-in must not silently reset a name an administrator has changed.
+      const existing = await db.getUserByOpenId(userInfo.openId);
+      const displayName = existing?.name || userInfo.name || "";
       await db.upsertUser({
         openId: userInfo.openId,
-        name: userInfo.name || null,
-        email: userInfo.email ?? null,
+        name: displayName || null,
+        email: userInfo.email ?? existing?.email ?? null,
         loginMethod: userInfo.loginMethod ?? userInfo.platform ?? null,
         lastSignedIn: new Date(),
       });
 
       const sessionToken = await sdk.createSessionToken(userInfo.openId, {
-        name: userInfo.name || "",
+        name: displayName,
         expiresInMs: ONE_YEAR_MS,
       });
 

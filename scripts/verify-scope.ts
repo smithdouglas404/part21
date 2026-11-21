@@ -12,7 +12,7 @@ import { COOKIE_NAME } from "../shared/const";
 const base = process.env.PART21_BASE_URL ?? "http://127.0.0.1:3000";
 
 async function main() {
-  const token = await sdk.signSession({ openId: process.env.PART21_TEST_OPEN_ID ?? "hJb4ZHUeEmhQEsRt87jMfS", appId: ENV.appId, name: "Pookie" }, { expiresInMs: 15 * 60 * 1000 });
+  const token = await sdk.signSession({ openId: process.env.PART21_TEST_OPEN_ID ?? "hJb4ZHUeEmhQEsRt87jMfS", appId: ENV.appId, name: "Frank" }, { expiresInMs: 15 * 60 * 1000 });
   const cookie = `${COOKIE_NAME}=${token}`;
   const session: any = await (await fetch(`${base}/api/session`, { headers: { cookie } })).json();
   const p = session.principal;

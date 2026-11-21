@@ -29,7 +29,7 @@ export class DomainRevisionConflict extends Error {
   }
 }
 
-export const globalAdministrativeRecordTypes = ["connect_token", "person", "approval_rule", "access_grant"] as const;
+export const globalAdministrativeRecordTypes = ["connect_token", "person", "approval_rule", "access_grant", "rbac_role"] as const;
 const globalAdministrativeTypes = new Set<string>(globalAdministrativeRecordTypes);
 /** Audits are top-level administrative records, not evidence owned by another audit. */
 const globalReadableTypes = new Set<string>([...globalAdministrativeRecordTypes, "audit"]);

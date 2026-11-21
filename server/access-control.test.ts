@@ -8,7 +8,7 @@ describe("common assurance authorization", () => {
   it("rejects missing audit and cross-audit requests", () => { expect(() => assertAuditPermission(base, "")).toThrow("explicit auditId"); expect(() => assertAuditPermission(base, "audit-b")).toThrow("audit scope"); });
   it("rejects persisted dialogue and attachment writes by look-only principals", () => { expect(() => assertAuditPermission({ ...base, access: "look_only" }, "audit-a", true)).toThrow("look-only"); });
   it("does not turn a read-only audit grant into a write grant", () => { expect(() => assertAuditPermission({ ...base, auditWriteIds: [] }, "audit-a", true)).toThrow("make-changes grant"); });
-  it("does not treat a persona or administrator as a qualified reviewer", () => { expect(() => requireAdministrator(base)).toThrow("persona"); expect(() => requireQualifiedReviewer({ ...base, isAdmin: true }, "audit-a")).toThrow("qualification"); });
+  it("does not treat a persona or administrator as a qualified reviewer", () => { expect(() => requireAdministrator(base)).toThrow("do not have permission"); expect(() => requireQualifiedReviewer({ ...base, isAdmin: true }, "audit-a")).toThrow("qualification"); });
   it("rejects a qualification valid for a different audit", () => { expect(() => requireQualifiedReviewer({ ...base, qualified: true, personId: "actual-person", qualificationEvidenceId: "actual-proof", qualifiedAuditIds: ["audit-b"] }, "audit-a")).toThrow("does not cover"); });
   it("allows an explicitly scoped qualified identity", () => { expect(() => requireQualifiedReviewer({ ...base, qualified: true, personId: "actual-person", qualificationEvidenceId: "actual-proof", qualifiedAuditIds: ["audit-a"] }, "audit-a")).not.toThrow(); });
 });

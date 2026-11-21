@@ -10,7 +10,7 @@ import { listAudits } from "../server/domain-store";
  * Run once after seeding audits:  pnpm exec tsx scripts/grant-demo-access.ts
  */
 const openId = process.env.PART21_TEST_OPEN_ID ?? "hJb4ZHUeEmhQEsRt87jMfS";
-const actor = process.env.PART21_TEST_ACTOR ?? "Pookie";
+const actor = process.env.PART21_TEST_ACTOR ?? "Frank";
 
 async function main() {
   const admin: AssurancePrincipal = {

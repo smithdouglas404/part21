@@ -8,7 +8,8 @@ export type AssurancePerson = {
   email: string;
   organization: string;
   active: boolean;
-  synthetic: true;
+  synthetic: boolean;
+  demonstration?: boolean;
 };
 
 export async function listAssurancePeople(roleId?: string) {

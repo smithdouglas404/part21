@@ -36,7 +36,7 @@ export function requestPrincipal(req: Request): AssurancePrincipal {
   return value;
 }
 export function requireAdministrator(principal: AssurancePrincipal) {
-  if (!principal.isAdmin) throw new AssuranceAccessError("Application administrator permission is required. A selected persona is not an authorization grant.");
+  if (!principal.isAdmin) throw new AssuranceAccessError("You do not have permission to administer this area at this time. Ask an application administrator to review your access.", 403);
 }
 export function assertAuditPermission(principal: AssurancePrincipal, auditId: string, write = false) {
   if (!auditId.trim()) throw new AssuranceAccessError("An explicit auditId is required.", 400);
@@ -137,4 +137,15 @@ export async function assertQualificationForAudit(principal: AssurancePrincipal,
   requireQualifiedReviewer(principal, auditId);
   const grants = await listDomainRecords<AuditAccessGrant>("access_grant", auditId);
   if (!grants.some(g => g.active && g.principalId === principal.id && g.personId === principal.personId && g.qualificationEvidenceId && g.qualifiedUntil && Date.parse(g.qualifiedUntil) > Date.now())) throw new AssuranceAccessError("No current reviewer qualification applies to this audit.");
+}
+
+export async function revokeAccessGrant(grantId: string, reason: string, principal: AssurancePrincipal) {
+  requireAdministrator(principal);
+  const grant = await getDomainRecord<AuditAccessGrant>("access_grant", grantId);
+  if (!grant) throw new AssuranceAccessError("Access grant was not found in the database.", 404);
+  if (grant.active === false) return { ok: true, alreadyRevoked: true, grant };
+  const revoked = { ...grant, active: false, revokedBy: principal.actor, revokedAt: new Date().toISOString(), revocationReason: reason.trim() || "Access reviewed and withdrawn by an administrator." };
+  await upsertDomainRecord({ recordType: "access_grant", recordId: grantId, auditId: grant.auditId, payload: revoked });
+  await appendAssuranceEvent({ type: "audit_access_grant_revoked", actor: principal.actor, auditId: grant.auditId, entityId: grantId, payload: { principalId: grant.principalId, roleIds: grant.roleIds, reason: revoked.revocationReason } });
+  return { ok: true, alreadyRevoked: false, grant: revoked };
 }
